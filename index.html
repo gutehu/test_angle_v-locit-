@@ -1,0 +1,240 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>RULA en direct - Segments colorés</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <style>
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      background: #111;
+      color: #eee;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 10px;
+    }
+    canvas {
+      border: 1px solid #444;
+      margin-top: 10px;
+    }
+    #poseCanvas {
+      width: 95vw;
+      height: auto;
+    }
+    #scoreDisplay {
+      margin-top: 10px;
+      font-size: 1.5rem;
+      font-weight: bold;
+    }
+    select {
+      margin-top: 10px;
+      padding: 10px;
+      font-size: 1rem;
+      border-radius: 8px;
+      border: none;
+    }
+    #errorMsg {
+      color: red;
+      margin-top: 20px;
+      font-size: 1rem;
+      text-align: center;
+      max-width: 300px;
+    }
+  </style>
+</head>
+<body>
+  <h2>RULA en direct – Affichage segmenté</h2>
+  <label for="cameraDeviceSelect">Choisir la caméra :</label>
+  <select id="cameraDeviceSelect"></select>
+  <div id="scoreDisplay">Score global : <span id="scoreValue">…</span></div>
+  <video class="input_video" style="display:none;" autoplay playsinline></video>
+  <canvas id="poseCanvas" width="640" height="480"></canvas>
+  <div id="errorMsg"></div>
+
+  <script>
+    const videoElement = document.querySelector('.input_video');
+    const canvas = document.getElementById('poseCanvas');
+    const ctx = canvas.getContext('2d');
+    const cameraDeviceSelect = document.getElementById('cameraDeviceSelect');
+    const scoreValue = document.getElementById('scoreValue');
+    const errorMsg = document.getElementById('errorMsg');
+    let camera = null;
+    let currentStream = null;
+
+    function calculateAngle(a, b, c) {
+      const ab = { x: b.x - a.x, y: b.y - a.y };
+      const cb = { x: b.x - c.x, y: b.y - c.y };
+      const dot = ab.x * cb.x + ab.y * cb.y;
+      const abMag = Math.sqrt(ab.x**2 + ab.y**2);
+      const cbMag = Math.sqrt(cb.x**2 + cb.y**2);
+      const angle = Math.acos(dot / (abMag * cbMag));
+      return Math.round(angle * 180 / Math.PI);
+    }
+
+    function rulaScore(angle) {
+      if (angle >= 70 && angle <= 100) return {score: 1, color: 'lime'};
+      if ((angle >= 50 && angle < 70) || (angle > 100 && angle <= 120)) return {score: 2, color: 'yellow'};
+      return {score: 3, color: 'red'};
+    }
+
+    function displayGlobalScore(total) {
+      const capped = Math.min(7, total);
+      let color = "white";
+      let label = "";
+
+      if (capped <= 2) { color = "lime"; label = "Acceptable"; }
+      else if (capped <= 4) { color = "gold"; label = "À surveiller"; }
+      else if (capped <= 6) { color = "orange"; label = "À corriger"; }
+      else { color = "red"; label = "Action immédiate"; }
+
+      scoreValue.textContent = `${capped} (${label})`;
+      scoreValue.style.backgroundColor = color;
+      scoreValue.style.padding = "6px 12px";
+      scoreValue.style.borderRadius = "8px";
+    }
+
+    async function listCameras() {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter(device => device.kind === 'videoinput');
+      cameraDeviceSelect.innerHTML = '';
+      videoDevices.forEach((device, index) => {
+        const option = document.createElement('option');
+        option.value = device.deviceId;
+        const label = device.label || `Caméra ${index + 1}`;
+        option.text = label.toLowerCase().includes("back") || label.toLowerCase().includes("rear") ? "📷 Caméra arrière" :
+                      label.toLowerCase().includes("front") || label.toLowerCase().includes("selfie") ? "📷 Caméra frontale" :
+                      label;
+        cameraDeviceSelect.appendChild(option);
+      });
+    }
+
+    async function startPoseDetection(deviceId) {
+      if (camera) {
+        camera.stop();
+        camera = null;
+      }
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { deviceId: { exact: deviceId } }
+        });
+        errorMsg.textContent = "";
+        videoElement.srcObject = stream;
+        currentStream = stream;
+
+        const pose = new Pose({
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
+        });
+
+        pose.setOptions({
+          modelComplexity: 1,
+          smoothLandmarks: true,
+          enableSegmentation: false,
+          minDetectionConfidence: 0.5,
+          minTrackingConfidence: 0.5
+        });
+
+        pose.onResults(results => {
+          ctx.save();
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
+          if (results.poseLandmarks) {
+            const lm = results.poseLandmarks;
+            const lShoulder = lm[11], lElbow = lm[13], lWrist = lm[15];
+            const rShoulder = lm[12], rElbow = lm[14], rWrist = lm[16];
+
+            let totalScore = 0;
+
+            if (lShoulder && lElbow && lWrist) {
+              const angleL = calculateAngle(lShoulder, lElbow, lWrist);
+              const {score: scoreL, color: colorL} = rulaScore(angleL);
+              totalScore += scoreL;
+
+              ctx.beginPath();
+              ctx.moveTo(lShoulder.x * canvas.width, lShoulder.y * canvas.height);
+              ctx.lineTo(lElbow.x * canvas.width, lElbow.y * canvas.height);
+              ctx.lineTo(lWrist.x * canvas.width, lWrist.y * canvas.height);
+              ctx.strokeStyle = colorL;
+              ctx.lineWidth = 4;
+              ctx.stroke();
+
+              ctx.fillStyle = colorL;
+              ctx.font = "16px sans-serif";
+              ctx.fillText(`⟲ ${angleL}°`, lElbow.x * canvas.width + 10, lElbow.y * canvas.height);
+            }
+
+            if (rShoulder && rElbow && rWrist) {
+              const angleR = calculateAngle(rShoulder, rElbow, rWrist);
+              const {score: scoreR, color: colorR} = rulaScore(angleR);
+              totalScore += scoreR;
+
+              ctx.beginPath();
+              ctx.moveTo(rShoulder.x * canvas.width, rShoulder.y * canvas.height);
+              ctx.lineTo(rElbow.x * canvas.width, rElbow.y * canvas.height);
+              ctx.lineTo(rWrist.x * canvas.width, rWrist.y * canvas.height);
+              ctx.strokeStyle = colorR;
+              ctx.lineWidth = 4;
+              ctx.stroke();
+
+              ctx.fillStyle = colorR;
+              ctx.font = "16px sans-serif";
+              ctx.fillText(`⟲ ${angleR}°`, rElbow.x * canvas.width + 10, rElbow.y * canvas.height);
+            }
+
+            displayGlobalScore(totalScore);
+          }
+
+          ctx.restore();
+        });
+
+        camera = new Camera(videoElement, {
+          onFrame: async () => await pose.send({ image: videoElement }),
+          width: 640,
+          height: 480
+        });
+
+        camera.start();
+      } catch (err) {
+        errorMsg.innerHTML = `
+          ❌ <strong>Caméra inaccessible</strong><br>
+          ➜ Ouvre ce lien dans un vrai navigateur (Chrome, Safari)<br>
+          🚫 Ne pas utiliser WhatsApp ou navigateur intégré<br>
+          🔁 Essaie de rafraîchir la page après autorisation
+        `;
+        console.error("Erreur caméra :", err);
+      }
+    }
+
+    cameraDeviceSelect.addEventListener('change', () => {
+      startPoseDetection(cameraDeviceSelect.value);
+    });
+
+    async function init() {
+      try {
+        await navigator.mediaDevices.getUserMedia({ video: true });
+      } catch (e) {
+        errorMsg.innerHTML = `
+          ❌ <strong>Permission caméra refusée</strong><br>
+          ➜ Accepte l'accès caméra pour activer la détection<br>
+          ➕ Sinon ouvre ce lien dans Chrome ou Safari
+        `;
+        return;
+      }
+
+      await listCameras();
+      if (cameraDeviceSelect.options.length > 0) {
+        startPoseDetection(cameraDeviceSelect.value);
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
