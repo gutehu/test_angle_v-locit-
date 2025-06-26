@@ -1,0 +1,114 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Vélocité et Vitesse Angulaire</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <style>
+    body {
+      background: #111;
+      color: #eee;
+      font-family: sans-serif;
+      text-align: center;
+    }
+    #poseCanvas {
+      margin-top: 10px;
+      width: 95vw;
+    }
+    #metrics {
+      font-size: 1.2rem;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h2>Vélocité du poignet droit & Vitesse angulaire du bras droit</h2>
+  <div id="metrics">
+    Vélocité (px/s) : <span id="velocity">–</span><br>
+    Vitesse angulaire (°/s) : <span id="angularVelocity">–</span>
+  </div>
+  <video class="input_video" style="display:none;" autoplay playsinline></video>
+  <canvas id="poseCanvas" width="640" height="480"></canvas>
+
+  <script>
+    const videoElement = document.querySelector('.input_video');
+    const canvas = document.getElementById('poseCanvas');
+    const ctx = canvas.getContext('2d');
+    const velocityEl = document.getElementById('velocity');
+    const angularVelocityEl = document.getElementById('angularVelocity');
+
+    let previous = { time: null, wrist: null, angle: null };
+
+    function calculateAngle(a, b, c) {
+      const ab = { x: b.x - a.x, y: b.y - a.y };
+      const cb = { x: b.x - c.x, y: b.y - c.y };
+      const dot = ab.x * cb.x + ab.y * cb.y;
+      const abMag = Math.sqrt(ab.x**2 + ab.y**2);
+      const cbMag = Math.sqrt(cb.x**2 + cb.y**2);
+      const angle = Math.acos(dot / (abMag * cbMag));
+      return angle * 180 / Math.PI;
+    }
+
+    const pose = new Pose({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
+    });
+
+    pose.setOptions({
+      modelComplexity: 1,
+      smoothLandmarks: true,
+      enableSegmentation: false,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    pose.onResults(results => {
+      ctx.save();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
+      const lm = results.poseLandmarks;
+      if (lm) {
+        const rShoulder = lm[12], rElbow = lm[14], rWrist = lm[16];
+
+        if (rShoulder && rElbow && rWrist) {
+          // Vélocité du poignet droit
+          const now = performance.now();
+          const current = {
+            time: now,
+            wrist: { x: rWrist.x * canvas.width, y: rWrist.y * canvas.height },
+            angle: calculateAngle(rShoulder, rElbow, rWrist)
+          };
+
+          if (previous.time !== null && previous.wrist) {
+            const dt = (current.time - previous.time) / 1000;
+            const dx = current.wrist.x - previous.wrist.x;
+            const dy = current.wrist.y - previous.wrist.y;
+            const distance = Math.sqrt(dx*dx + dy*dy);
+            const velocity = distance / dt;
+
+            // Vitesse angulaire
+            const dAngle = current.angle - previous.angle;
+            const angularVelocity = Math.abs(dAngle / dt);
+
+            velocityEl.textContent = velocity.toFixed(1);
+            angularVelocityEl.textContent = angularVelocity.toFixed(1);
+          }
+
+          previous = current;
+        }
+      }
+
+      ctx.restore();
+    });
+
+    const camera = new Camera(videoElement, {
+      onFrame: async () => await pose.send({ image: videoElement }),
+      width: 640,
+      height: 480
+    });
+
+    camera.start();
+  </script>
+</body>
+</html>
