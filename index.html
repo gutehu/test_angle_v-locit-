@@ -1,0 +1,239 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>MediaPipe Pose - Graphe des coudes (canvas)</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <style>
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      background: #111;
+      color: #eee;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 10px;
+    }
+    canvas {
+      border: 1px solid #444;
+      margin-top: 10px;
+    }
+    #poseCanvas {
+      width: 95vw;
+      height: auto;
+    }
+    #graphCanvas {
+      width: 95vw;
+      height: 150px;
+    }
+    select {
+      margin-top: 10px;
+      padding: 10px;
+      font-size: 1rem;
+      border-radius: 8px;
+      border: none;
+    }
+    #errorMsg {
+      color: red;
+      margin-top: 20px;
+      font-size: 1rem;
+      text-align: center;
+      max-width: 300px;
+    }
+  </style>
+</head>
+<body>
+  <h2>MediaPipe Pose - Graphe des angles des coudes</h2>
+  <label for="cameraDeviceSelect">Choisir la caméra :</label>
+  <select id="cameraDeviceSelect"></select>
+  <video class="input_video" style="display:none;" autoplay playsinline></video>
+  <canvas id="poseCanvas" width="640" height="480"></canvas>
+  <canvas id="graphCanvas" width="640" height="150"></canvas>
+  <div id="errorMsg"></div>
+
+  <script>
+    const videoElement = document.querySelector('.input_video');
+    const poseCanvas = document.getElementById('poseCanvas');
+    const poseCtx = poseCanvas.getContext('2d');
+    const graphCanvas = document.getElementById('graphCanvas');
+    const graphCtx = graphCanvas.getContext('2d');
+    const cameraDeviceSelect = document.getElementById('cameraDeviceSelect');
+    const errorMsg = document.getElementById('errorMsg');
+
+    let camera = null;
+    let currentStream = null;
+    let leftAngles = [];
+    let rightAngles = [];
+    const maxPoints = 100;
+
+    function calculateAngle(a, b, c) {
+      const ab = { x: b.x - a.x, y: b.y - a.y };
+      const cb = { x: b.x - c.x, y: b.y - c.y };
+      const dot = ab.x * cb.x + ab.y * cb.y;
+      const abMag = Math.sqrt(ab.x**2 + ab.y**2);
+      const cbMag = Math.sqrt(cb.x**2 + cb.y**2);
+      const angle = Math.acos(dot / (abMag * cbMag));
+      return Math.round(angle * 180 / Math.PI);
+    }
+
+    function drawAngleGraph() {
+      graphCtx.clearRect(0, 0, graphCanvas.width, graphCanvas.height);
+      graphCtx.lineWidth = 2;
+
+      const scaleY = graphCanvas.height / 180;
+
+      function drawLine(data, color) {
+        graphCtx.beginPath();
+        graphCtx.strokeStyle = color;
+        data.forEach((val, i) => {
+          const x = i * (graphCanvas.width / maxPoints);
+          const y = graphCanvas.height - val * scaleY;
+          i === 0 ? graphCtx.moveTo(x, y) : graphCtx.lineTo(x, y);
+        });
+        graphCtx.stroke();
+      }
+
+      drawLine(leftAngles, 'cyan');
+      drawLine(rightAngles, 'lime');
+    }
+
+    async function listCameras() {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter(device => device.kind === 'videoinput');
+      cameraDeviceSelect.innerHTML = '';
+      videoDevices.forEach((device, index) => {
+        const option = document.createElement('option');
+        option.value = device.deviceId;
+        const label = device.label || `Caméra ${index + 1}`;
+        option.text = label.toLowerCase().includes("back") || label.toLowerCase().includes("rear") ? "📷 Caméra arrière" :
+                      label.toLowerCase().includes("front") || label.toLowerCase().includes("selfie") ? "📷 Caméra frontale" :
+                      label;
+        cameraDeviceSelect.appendChild(option);
+      });
+    }
+
+    async function startPoseDetection(deviceId) {
+      if (camera) {
+        camera.stop();
+        camera = null;
+      }
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { deviceId: { exact: deviceId } }
+        });
+        errorMsg.textContent = "";
+        videoElement.srcObject = stream;
+        currentStream = stream;
+
+        const pose = new Pose({
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
+        });
+
+        pose.setOptions({
+          modelComplexity: 1,
+          smoothLandmarks: true,
+          enableSegmentation: false,
+          minDetectionConfidence: 0.5,
+          minTrackingConfidence: 0.5
+        });
+
+        pose.onResults(results => {
+          poseCtx.save();
+          poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
+          poseCtx.drawImage(results.image, 0, 0, poseCanvas.width, poseCanvas.height);
+
+          if (results.poseLandmarks) {
+            const lm = results.poseLandmarks;
+            const lShoulder = lm[11], lElbow = lm[13], lWrist = lm[15];
+            const rShoulder = lm[12], rElbow = lm[14], rWrist = lm[16];
+
+            if (lShoulder && lElbow && lWrist) {
+              const angleL = calculateAngle(lShoulder, lElbow, lWrist);
+              leftAngles.push(angleL);
+              if (leftAngles.length > maxPoints) leftAngles.shift();
+            }
+            if (rShoulder && rElbow && rWrist) {
+              const angleR = calculateAngle(rShoulder, rElbow, rWrist);
+              rightAngles.push(angleR);
+              if (rightAngles.length > maxPoints) rightAngles.shift();
+            }
+
+            drawAngleGraph();
+
+            for (let landmark of lm) {
+              poseCtx.beginPath();
+              poseCtx.arc(landmark.x * poseCanvas.width, landmark.y * poseCanvas.height, 5, 0, 2 * Math.PI);
+              poseCtx.fillStyle = 'cyan';
+              poseCtx.fill();
+            }
+
+            const connections = [
+              [11, 13], [13, 15], [12, 14], [14, 16], [11, 12]
+            ];
+            poseCtx.lineWidth = 2;
+            poseCtx.strokeStyle = 'lime';
+            for (const [i, j] of connections) {
+              const a = lm[i];
+              const b = lm[j];
+              if (a && b) {
+                poseCtx.beginPath();
+                poseCtx.moveTo(a.x * poseCanvas.width, a.y * poseCanvas.height);
+                poseCtx.lineTo(b.x * poseCanvas.width, b.y * poseCanvas.height);
+                poseCtx.stroke();
+              }
+            }
+          }
+          poseCtx.restore();
+        });
+
+        camera = new Camera(videoElement, {
+          onFrame: async () => await pose.send({ image: videoElement }),
+          width: 640,
+          height: 480
+        });
+
+        camera.start();
+      } catch (err) {
+        errorMsg.innerHTML = `
+          ❌ <strong>Caméra inaccessible</strong><br>
+          ➜ Ouvre ce lien dans un vrai navigateur (Chrome, Safari)<br>
+          🚫 Ne pas utiliser WhatsApp ou navigateur intégré<br>
+          🔁 Essaie de rafraîchir la page après autorisation
+        `;
+        console.error("Erreur caméra :", err);
+      }
+    }
+
+    cameraDeviceSelect.addEventListener('change', () => {
+      startPoseDetection(cameraDeviceSelect.value);
+    });
+
+    async function init() {
+      try {
+        await navigator.mediaDevices.getUserMedia({ video: true });
+      } catch (e) {
+        errorMsg.innerHTML = `
+          ❌ <strong>Permission caméra refusée</strong><br>
+          ➜ Accepte l'accès caméra pour activer la détection<br>
+          ➕ Sinon ouvre ce lien dans Chrome ou Safari
+        `;
+        return;
+      }
+
+      await listCameras();
+
+      if (cameraDeviceSelect.options.length > 0) {
+        startPoseDetection(cameraDeviceSelect.value);
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
