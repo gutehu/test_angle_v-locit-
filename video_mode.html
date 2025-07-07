@@ -1,0 +1,101 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Analyse biomécanique depuis une vidéo</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <style>
+    body {
+      background: #111;
+      color: #eee;
+      font-family: sans-serif;
+      text-align: center;
+      margin: 0;
+      padding: 20px;
+    }
+    video, canvas {
+      max-width: 90%;
+      margin-top: 10px;
+    }
+    #uploadBtn {
+      margin-top: 20px;
+      padding: 10px 20px;
+      background-color: #444;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>Analyse biomécanique d’une vidéo</h1>
+
+  <input type="file" id="videoInput" accept="video/*" style="display: none;" />
+  <button id="uploadBtn">📁 Télécharger une vidéo</button><br>
+
+  <video id="videoElement" controls muted playsinline></video>
+  <canvas id="outputCanvas"></canvas>
+
+  <script>
+    const videoElement = document.getElementById('videoElement');
+    const canvasElement = document.getElementById('outputCanvas');
+    const canvasCtx = canvasElement.getContext('2d');
+
+    const videoInput = document.getElementById('videoInput');
+    const uploadBtn = document.getElementById('uploadBtn');
+    uploadBtn.onclick = () => videoInput.click();
+
+    videoInput.onchange = (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      videoElement.src = url;
+      videoElement.load();
+      videoElement.play();
+    };
+
+    const pose = new Pose.Pose({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
+    });
+
+    pose.setOptions({
+      modelComplexity: 1,
+      smoothLandmarks: true,
+      enableSegmentation: false,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    pose.onResults((results) => {
+      canvasElement.width = videoElement.videoWidth;
+      canvasElement.height = videoElement.videoHeight;
+
+      canvasCtx.save();
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      canvasCtx.drawImage(
+        results.image, 0, 0, canvasElement.width, canvasElement.height);
+      if (results.poseLandmarks) {
+        drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS,
+                       {color: '#00FF00', lineWidth: 4});
+        drawLandmarks(canvasCtx, results.poseLandmarks,
+                      {color: '#FF0000', lineWidth: 2});
+      }
+      canvasCtx.restore();
+    });
+
+    function processFrame() {
+      if (!videoElement.paused && !videoElement.ended) {
+        pose.send({image: videoElement});
+        requestAnimationFrame(processFrame);
+      }
+    }
+
+    videoElement.onplay = () => {
+      requestAnimationFrame(processFrame);
+    };
+  </script>
+</body>
+</html>
