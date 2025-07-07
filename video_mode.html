@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
-  <title>Analyse vidéo (landmarks + vélocité main droite)</title>
+  <title>Analyse d'une vidéo (MediaPipe)</title>
   <style>
     body {
       margin: 0;
@@ -13,21 +13,24 @@
       flex-direction: column;
       align-items: center;
     }
+    video {
+      visibility: hidden;
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
     canvas {
       position: absolute;
       top: 0;
       left: 0;
     }
-    video {
-      display: none;
-    }
     #controls {
       margin-top: 20px;
     }
-    #velocityDisplay {
-      margin-top: 10px;
-      font-size: 1.2em;
-      color: #0f0;
+    #velocity {
+      margin-top: 80px;
+      font-size: 20px;
+      color: lime;
     }
   </style>
 </head>
@@ -39,25 +42,35 @@
     <button id="playBtn">▶️ Lecture</button>
     <button id="pauseBtn">⏸️ Pause</button>
   </div>
-  <div id="velocityDisplay">Vélocité main droite : 0.00 px/frame</div>
 
   <div style="position: relative;">
     <video id="inputVideo"></video>
     <canvas id="outputCanvas"></canvas>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.4/pose.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.4/drawing_utils.js"></script>
-  <script>
+  <div id="velocity">Vélocité main droite : 0.00 px/frame</div>
+
+  <script type="module">
+    import {
+      Pose,
+      POSE_CONNECTIONS,
+    } from 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js';
+
+    import {
+      drawConnectors,
+      drawLandmarks
+    } from 'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.5/drawing_utils.js';
+
     const video = document.getElementById('inputVideo');
     const canvas = document.getElementById('outputCanvas');
     const ctx = canvas.getContext('2d');
-    const velocityDisplay = document.getElementById('velocityDisplay');
+    const velocityDisplay = document.getElementById('velocity');
 
-    let lastRightHand = null;
+    let previousRightHand = null;
 
     const pose = new Pose({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.4/${file}`,
+      locateFile: (file) =>
+        `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`,
     });
 
     pose.setOptions({
@@ -73,28 +86,32 @@
     function onResults(results) {
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
+
       ctx.save();
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
       if (results.poseLandmarks) {
-        drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS,
-          { color: '#00FF00', lineWidth: 2 });
-        drawLandmarks(ctx, results.poseLandmarks,
-          { color: '#FF0000', lineWidth: 1 });
+        drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, {
+          color: '#00FF00',
+          lineWidth: 2,
+        });
+        drawLandmarks(ctx, results.poseLandmarks, {
+          color: '#FF0000',
+          lineWidth: 1,
+        });
 
-        const rightWrist = results.poseLandmarks[16];
-        if (lastRightHand) {
-          const dx = rightWrist.x - lastRightHand.x;
-          const dy = rightWrist.y - lastRightHand.y;
-          const dz = rightWrist.z - lastRightHand.z;
+        const rightHand = results.poseLandmarks[16]; // index 16 = right wrist
+        if (previousRightHand) {
+          const dx = rightHand.x - previousRightHand.x;
+          const dy = rightHand.y - previousRightHand.y;
+          const dz = rightHand.z - previousRightHand.z;
           const velocity = Math.sqrt(dx * dx + dy * dy + dz * dz);
-          const scaledVelocity = velocity * canvas.width;
-          velocityDisplay.textContent = `Vélocité main droite : ${scaledVelocity.toFixed(2)} px/frame`;
+          velocityDisplay.textContent =
+            `Vélocité main droite : ${velocity.toFixed(2)} px/frame`;
         }
-        lastRightHand = { ...rightWrist };
+        previousRightHand = rightHand;
       }
-
       ctx.restore();
     }
 
@@ -105,17 +122,25 @@
       const fileURL = URL.createObjectURL(file);
       video.src = fileURL;
       await video.load();
+      console.log("Vidéo chargée");
     });
 
-    document.getElementById('playBtn').addEventListener('click', () => {
-      video.play();
+    document.getElementById('playBtn').addEventListener('click', async () => {
+      try {
+        await video.play();
+        console.log("Lecture demandée");
+      } catch (err) {
+        console.error("Erreur lecture vidéo :", err);
+      }
     });
 
     document.getElementById('pauseBtn').addEventListener('click', () => {
       video.pause();
+      console.log("Vidéo en pause");
     });
 
     video.addEventListener('play', async () => {
+      console.log("Vidéo en lecture");
       async function processFrame() {
         if (!video.paused && !video.ended) {
           await pose.send({ image: video });
