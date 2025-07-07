@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
-  <title>Analyse vidéo (MediaPipe + Vélocité)</title>
+  <title>Analyse vidéo - Vélocité main droite</title>
   <style>
     body {
       margin: 0;
@@ -47,15 +47,20 @@
   </div>
 
   <script type="module">
-    import {
-      Pose,
-      POSE_CONNECTIONS,
-    } from 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js';
-
+    import { Pose } from 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js';
     import {
       drawConnectors,
       drawLandmarks
     } from 'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.5/drawing_utils.js';
+
+    // Connexions de base (réduites à quelques-unes pour démonstration)
+    const POSE_CONNECTIONS = [
+      [11, 13], [13, 15], // Bras gauche
+      [12, 14], [14, 16], // Bras droit
+      [11, 12],           // Épaules
+      [23, 24],           // Hanches
+      [11, 23], [12, 24]  // Tronc
+    ];
 
     const video = document.getElementById('inputVideo');
     const canvas = document.getElementById('outputCanvas');
@@ -88,10 +93,11 @@
       ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
       if (results.poseLandmarks) {
-        drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#00FF00', lineWidth: 2 });
-        drawLandmarks(ctx, results.poseLandmarks, { color: '#FF0000', lineWidth: 1 });
+        drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS,
+          { color: '#00FF00', lineWidth: 2 });
+        drawLandmarks(ctx, results.poseLandmarks,
+          { color: '#FF0000', lineWidth: 1 });
 
-        // Calcul de la vélocité de la main droite (landmark 16)
         const rightWrist = results.poseLandmarks[16];
         const now = performance.now();
 
