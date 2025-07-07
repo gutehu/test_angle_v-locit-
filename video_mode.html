@@ -35,7 +35,17 @@
 <body>
 
   <h1>Analyse biomécanique d'un swing (vidéo)</h1>
-  <input type="file" id="videoInput" accept="video/*" />
+  
+    <label for="videoInput" style="
+      background: #444;
+      padding: 10px 20px;
+      border-radius: 5px;
+      cursor: pointer;
+      display: inline-block;
+      margin-bottom: 10px;
+    ">📁 Télécharger une vidéo</label>
+    <input type="file" id="videoInput" accept="video/*" style="display: none;" />
+    
   <br />
 
   <div id="container">
