@@ -1,173 +1,110 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Analyse Vidéo - MediaPipe Pose</title>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
+  <meta charset="UTF-8" />
+  <title>Analyse vidéo (landmarks)</title>
   <style>
-    body { background-color: #111; color: #eee; text-align: center; font-family: sans-serif; }
-    canvas, video { position: absolute; top: 0; left: 0; }
-    #container { position: relative; width: 640px; margin: auto; }
-    #controls { margin-top: 400px; }
-    #results { margin-top: 20px; border: 1px solid #666; padding: 10px; }
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      background: #111;
+      color: #eee;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+    video {
+      display: none;
+    }
+    #controls {
+      margin-top: 20px;
+    }
   </style>
 </head>
 <body>
-  <h2>Analyse biomécanique d'une vidéo</h2>
-  <div id="container">
-    <video id="inputVideo" width="640" height="480" controls muted style="z-index:1;"></video>
-    <canvas id="outputCanvas" width="640" height="480" style="z-index:2;"></canvas>
-  </div>
+  <h2>Analyse d'une vidéo (MediaPipe)</h2>
 
+  <input type="file" id="videoInput" accept="video/*" />
   <div id="controls">
-    <input type="file" id="uploadVideo" accept="video/*">
-    <button onclick="startAnalysis()">Lancer l’analyse</button>
+    <button id="playBtn">▶️ Lecture</button>
+    <button id="pauseBtn">⏸️ Pause</button>
   </div>
 
-  <div id="results">
-    <h3>Résultats</h3>
-    <p>Hauteur max de la main (rel. au pied) : <span id="maxHeight">-</span></p>
-    <p>Vélocité max de la main : <span id="maxVelocity">-</span> px/s</p>
-    <p>Vitesse angulaire max du bras : <span id="maxAngularVelocity">-</span> °/s</p>
-    <p>Distance genoux min-max : <span id="kneeDistRange">-</span> px</p>
+  <div style="position: relative;">
+    <video id="inputVideo"></video>
+    <canvas id="outputCanvas"></canvas>
   </div>
 
-  <script>
-    const video = document.getElementById("inputVideo");
-    const canvas = document.getElementById("outputCanvas");
-    const ctx = canvas.getContext("2d");
+  <script type="module">
+    import { Pose } from 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js';
+    import { drawConnectors, drawLandmarks } from 'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.5/drawing_utils.js';
 
-    let maxVelocity = 0;
-    let maxAngularVelocity = 0;
-    let maxHeightRatio = 0;
-    let minKneeDist = Infinity;
-    let maxKneeDist = 0;
+    const video = document.getElementById('inputVideo');
+    const canvas = document.getElementById('outputCanvas');
+    const ctx = canvas.getContext('2d');
 
-    let previousWrist = null;
-    let previousAngle = null;
-    let previousTimestamp = null;
-
-    document.getElementById("uploadVideo").addEventListener("change", function(event) {
-      const file = event.target.files[0];
-      if (file) {
-        const url = URL.createObjectURL(file);
-        video.src = url;
-        video.load();
-      }
+    const pose = new Pose({
+      locateFile: (file) =>
+        `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`,
     });
 
-    const pose = new Pose.Pose({
-      locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
-    });
     pose.setOptions({
       modelComplexity: 1,
       smoothLandmarks: true,
       enableSegmentation: false,
       minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5
+      minTrackingConfidence: 0.5,
     });
+
     pose.onResults(onResults);
 
-    function startAnalysis() {
-      resetMetrics();
-      video.currentTime = 0;
-      video.play();
-      processFrame();
-    }
-
-    function resetMetrics() {
-      maxVelocity = 0;
-      maxAngularVelocity = 0;
-      maxHeightRatio = 0;
-      minKneeDist = Infinity;
-      maxKneeDist = 0;
-      previousWrist = null;
-      previousAngle = null;
-      previousTimestamp = null;
-    }
-
-    function processFrame() {
-      if (video.paused || video.ended) {
-        displayResults();
-        return;
-      }
-
-      const tempCanvas = document.createElement("canvas");
-      tempCanvas.width = video.videoWidth;
-      tempCanvas.height = video.videoHeight;
-      const tempCtx = tempCanvas.getContext("2d");
-      tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
-
-      pose.send({ image: tempCanvas });
-
-      requestAnimationFrame(processFrame);
-    }
-
     function onResults(results) {
-      if (!results.poseLandmarks) return;
-
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.save();
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      drawConnectors(ctx, results.poseLandmarks, Pose.POSE_CONNECTIONS, { color: "#00FF00", lineWidth: 2 });
-      drawLandmarks(ctx, results.poseLandmarks, { color: "#FF0000", lineWidth: 1 });
+      ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
-      const landmarks = results.poseLandmarks;
-      const now = performance.now();
-
-      const rightWrist = landmarks[16];
-      const rightElbow = landmarks[14];
-      const rightShoulder = landmarks[12];
-      const leftKnee = landmarks[25];
-      const rightKnee = landmarks[26];
-      const rightAnkle = landmarks[28];
-
-      // Vélocité de la main droite
-      if (previousWrist) {
-        const dx = rightWrist.x - previousWrist.x;
-        const dy = rightWrist.y - previousWrist.y;
-        const dt = (now - previousTimestamp) / 1000;
-        const velocity = Math.sqrt(dx*dx + dy*dy) / dt;
-        if (velocity > maxVelocity) maxVelocity = velocity;
+      if (results.poseLandmarks) {
+        drawConnectors(ctx, results.poseLandmarks, Pose.POSE_CONNECTIONS,
+          { color: '#00FF00', lineWidth: 2 });
+        drawLandmarks(ctx, results.poseLandmarks,
+          { color: '#FF0000', lineWidth: 1 });
       }
-      previousWrist = rightWrist;
-      previousTimestamp = now;
+      ctx.restore();
+    }
 
-      // Vitesse angulaire du bras
-      const angle = getAngle(rightShoulder, rightElbow, rightWrist);
-      if (previousAngle != null) {
-        const dAngle = Math.abs(angle - previousAngle);
-        const angularVelocity = dAngle / ((now - previousTimestamp) / 1000);
-        if (angularVelocity > maxAngularVelocity) maxAngularVelocity = angularVelocity;
+    document.getElementById('videoInput').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const fileURL = URL.createObjectURL(file);
+      video.src = fileURL;
+      await video.load();
+    });
+
+    document.getElementById('playBtn').addEventListener('click', () => {
+      video.play();
+    });
+
+    document.getElementById('pauseBtn').addEventListener('click', () => {
+      video.pause();
+    });
+
+    video.addEventListener('play', async () => {
+      async function processFrame() {
+        if (!video.paused && !video.ended) {
+          await pose.send({ image: video });
+          requestAnimationFrame(processFrame);
+        }
       }
-      previousAngle = angle;
-
-      // Hauteur relative de la main
-      const heightRatio = 1 - (rightWrist.y / rightAnkle.y);
-      if (heightRatio > maxHeightRatio) maxHeightRatio = heightRatio;
-
-      // Distance entre les deux genoux
-      const dxKnee = rightKnee.x - leftKnee.x;
-      const dyKnee = rightKnee.y - leftKnee.y;
-      const distKnee = Math.sqrt(dxKnee * dxKnee + dyKnee * dyKnee);
-      if (distKnee > maxKneeDist) maxKneeDist = distKnee;
-      if (distKnee < minKneeDist) minKneeDist = distKnee;
-    }
-
-    function getAngle(a, b, c) {
-      const ab = { x: b.x - a.x, y: b.y - a.y };
-      const cb = { x: b.x - c.x, y: b.y - c.y };
-      const dot = ab.x * cb.x + ab.y * cb.y;
-      const normAb = Math.sqrt(ab.x * ab.x + ab.y * ab.y);
-      const normCb = Math.sqrt(cb.x * cb.x + cb.y * cb.y);
-      return Math.acos(dot / (normAb * normCb)) * (180 / Math.PI);
-    }
-
-    function displayResults() {
-      document.getElementById("maxVelocity").textContent = maxVelocity.toFixed(2);
-      document.getElementById("maxAngularVelocity").textContent = maxAngularVelocity.toFixed(2);
-      document.getElementById("maxHeight").textContent = maxHeightRatio.toFixed(2);
-      document.getElementById("kneeDistRange").textContent = `${minKneeDist.toFixed(2)} – ${maxKneeDist.toFixed(2)}`;
-    }
+      requestAnimationFrame(processFrame);
+    });
   </script>
 </body>
 </html>
