@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
   <meta charset="UTF-8" />
   <title>Analyse vidéo (MediaPipe)</title>
@@ -52,7 +52,7 @@
     import {
       drawConnectors,
       drawLandmarks
-    } from 'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.4/drawing_utils.js';
+    } from 'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js';
 
     const video = document.getElementById('inputVideo');
     const canvas = document.getElementById('outputCanvas');
@@ -106,6 +106,7 @@
         lastRightHand = rightHand;
         lastTime = now;
       }
+
       ctx.restore();
     }
 
