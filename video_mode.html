@@ -3,7 +3,7 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
-  <title>Analyse biomécanique sur vidéo</title>
+  <title>Test Analyse Vidéo</title>
   <style>
     body {
       background: #111;
@@ -19,159 +19,46 @@
     }
     canvas {
       position: absolute;
-      left: 0;
       top: 0;
+      left: 0;
       z-index: 1;
     }
-    label {
+    #uploadBtn {
       background: #444;
       padding: 10px 20px;
+      border: none;
+      color: white;
       border-radius: 5px;
       cursor: pointer;
-      display: inline-block;
-    }
-    input[type="file"] {
-      display: none;
+      margin-bottom: 10px;
     }
   </style>
 </head>
 <body>
 
-  <h1>Analyse biomécanique à partir d'une vidéo</h1>
+  <h1>Test : Analyse biomécanique vidéo</h1>
 
-  
-    <input type="file" id="videoInput" accept="video/*" style="display: none;" />
-    <button id="uploadBtn">📁 Télécharger une vidéo</button>
-    <script>
-      document.getElementById('uploadBtn').onclick = () => {
-        document.getElementById('videoInput').click();
-      };
-    </script>
-    
+  <input type="file" id="videoInput" accept="video/*" style="display: none;" />
+  <button id="uploadBtn">📁 Télécharger une vidéo</button>
   <br />
   <video id="uploadedVideo" controls muted playsinline></video>
   <canvas id="outputCanvas"></canvas>
 
-  <br><br>
-  <button id="startAnalysis">▶️ Début de l'analyse</button>
-  <button id="stopAnalysis">⏹ Fin de l'analyse</button>
-  <br><br>
-
-  <canvas id="chartCanvas" width="600" height="200"></canvas>
-
-  <h2>Valeurs maximales observées</h2>
-  <table style="margin: auto; border-collapse: collapse;">
-    <tr><td style="border: 1px solid white; padding: 6px;">Vélocité max (px/s)</td><td id="vmax"></td></tr>
-    <tr><td style="border: 1px solid white; padding: 6px;">Vitesse angulaire max (°/s)</td><td id="amax"></td></tr>
-    <tr><td style="border: 1px solid white; padding: 6px;">Hauteur main-pied max (rel)</td><td id="hmax"></td></tr>
-    <tr><td style="border: 1px solid white; padding: 6px;">Distance genoux min (rel)</td><td id="kdmin"></td></tr>
-    <tr><td style="border: 1px solid white; padding: 6px;">Distance genoux max (rel)</td><td id="kdmax"></td></tr>
-  </table>
+  <button id="startBtn">▶️ Démarrer l'analyse</button>
 
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <script>
     const video = document.getElementById('uploadedVideo');
     const canvas = document.getElementById('outputCanvas');
     const ctx = canvas.getContext('2d');
 
-    const pose = new Pose({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
-    });
-    pose.setOptions({
-      modelComplexity: 1,
-      smoothLandmarks: true,
-      enableSegmentation: false,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5
-    });
+    const videoInput = document.getElementById('videoInput');
+    const uploadBtn = document.getElementById('uploadBtn');
+    uploadBtn.onclick = () => videoInput.click();
 
-    const chartCtx = document.getElementById('chartCanvas').getContext('2d');
-    const velocityChart = new Chart(chartCtx, {
-      type: 'line',
-      data: {
-        labels: [],
-        datasets: [
-          { label: 'Vélocité main (px/s)', data: [], borderColor: 'yellow', fill: false },
-          { label: 'Vitesse angulaire bras (°/s)', data: [], borderColor: 'magenta', fill: false }
-        ]
-      },
-      options: { animation: false, responsive: true, scales: { y: { beginAtZero: true } } }
-    });
-
-    let analyzing = false;
-    let prevTime = null;
-    let prevWrist = null;
-    let prevAngle = null;
-    let maxValues = null;
-
-    function angle3D(a, b, c) {
-      const ab = [b.x - a.x, b.y - a.y, b.z - a.z];
-      const cb = [b.x - c.x, b.y - c.y, b.z - c.z];
-      const dot = ab[0]*cb[0] + ab[1]*cb[1] + ab[2]*cb[2];
-      const normAB = Math.sqrt(ab[0]**2 + ab[1]**2 + ab[2]**2);
-      const normCB = Math.sqrt(cb[0]**2 + cb[1]**2 + cb[2]**2);
-      return Math.acos(dot / (normAB * normCB)) * (180 / Math.PI);
-    }
-
-    pose.onResults((results) => {
-      if (!results.poseLandmarks) return;
-
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#0f0' });
-      drawLandmarks(ctx, results.poseLandmarks, { color: '#f0f', radius: 3 });
-
-      if (!analyzing) return;
-
-      const lm = results.poseLandmarks;
-      const now = performance.now();
-      const dt = prevTime ? (now - prevTime) / 1000 : 0;
-      prevTime = now;
-
-      const wrist = lm[16], elbow = lm[14], shoulder = lm[12], foot = lm[28], kneeR = lm[26], kneeL = lm[25];
-      const dx = wrist.x - (prevWrist?.x || wrist.x);
-      const dy = wrist.y - (prevWrist?.y || wrist.y);
-      const dz = wrist.z - (prevWrist?.z || wrist.z);
-      const velocity = dt > 0 ? Math.sqrt(dx*dx + dy*dy + dz*dz) / dt : 0;
-      const angle = angle3D(shoulder, elbow, wrist);
-      const angularVelocity = prevAngle !== null ? Math.abs(angle - prevAngle) / dt : 0;
-      const relativeHeight = wrist.y - foot.y;
-      const kneeDist = Math.sqrt((kneeR.x - kneeL.x)**2 + (kneeR.y - kneeL.y)**2 + (kneeR.z - kneeL.z)**2);
-
-      prevWrist = wrist;
-      prevAngle = angle;
-
-      velocityChart.data.labels.push('');
-      velocityChart.data.datasets[0].data.push(velocity.toFixed(4));
-      velocityChart.data.datasets[1].data.push(angularVelocity.toFixed(4));
-      velocityChart.update();
-
-      if (!maxValues) maxValues = { velocity: 0, angular: 0, height: -Infinity, kneeMin: Infinity, kneeMax: 0 };
-      maxValues.velocity = Math.max(maxValues.velocity, velocity);
-      maxValues.angular = Math.max(maxValues.angular, angularVelocity);
-      maxValues.height = Math.max(maxValues.height, relativeHeight);
-      maxValues.kneeMin = Math.min(maxValues.kneeMin, kneeDist);
-      maxValues.kneeMax = Math.max(maxValues.kneeMax, kneeDist);
-    });
-
-    document.getElementById('startAnalysis').onclick = () => { analyzing = true; };
-    document.getElementById('stopAnalysis').onclick = () => {
-      analyzing = false;
-      if (maxValues) {
-        document.getElementById('vmax').textContent = maxValues.velocity.toFixed(4);
-        document.getElementById('amax').textContent = maxValues.angular.toFixed(4);
-        document.getElementById('hmax').textContent = maxValues.height.toFixed(4);
-        document.getElementById('kdmin').textContent = maxValues.kneeMin.toFixed(4);
-        document.getElementById('kdmax').textContent = maxValues.kneeMax.toFixed(4);
-      }
-    };
-
-    document.getElementById('videoInput').addEventListener('change', (e) => {
+    videoInput.addEventListener('change', (e) => {
       const file = e.target.files[0];
       if (file) {
         const url = URL.createObjectURL(file);
@@ -181,19 +68,38 @@
       }
     });
 
+    const pose = new Pose.Pose({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+    });
+
+    pose.setOptions({
+      modelComplexity: 1,
+      smoothLandmarks: true,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    pose.onResults((results) => {
+      if (!results.poseLandmarks) return;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#0f0' });
+      drawLandmarks(ctx, results.poseLandmarks, { color: '#f0f', radius: 3 });
+    });
+
     function analyzeFrame() {
-      if (video.paused || video.ended) {
-        requestAnimationFrame(analyzeFrame);
-        return;
-      }
+      if (video.paused || video.ended) return;
       pose.send({ image: video });
       requestAnimationFrame(analyzeFrame);
     }
 
-    video.addEventListener('play', () => {
-      prevTime = null;
+    document.getElementById('startBtn').onclick = () => {
+      video.play();
       analyzeFrame();
-    });
+    };
   </script>
+
 </body>
 </html>
