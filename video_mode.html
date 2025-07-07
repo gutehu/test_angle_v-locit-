@@ -48,11 +48,8 @@
   <div id="velocityDisplay">Vélocité main droite : 0.00 px/frame</div>
 
   <script type="module">
-    import {
-      Pose,
-      POSE_CONNECTIONS,
-    } from 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js';
-
+    import { Pose } from 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js';
+    import { POSE_CONNECTIONS } from 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose_connections.js';
     import {
       drawConnectors,
       drawLandmarks
@@ -99,7 +96,6 @@
         drawLandmarks(ctx, results.poseLandmarks,
           { color: '#FF0000', lineWidth: 1 });
 
-        // Main droite = landmark index 16
         const rightWrist = results.poseLandmarks[16];
 
         if (previousWrist) {
