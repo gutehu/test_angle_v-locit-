@@ -21,6 +21,16 @@
     #uploadInput {
       margin-top: 1rem;
     }
+    table {
+      margin: 20px auto;
+      border-collapse: collapse;
+      background: #1e1e1e;
+      color: #fff;
+    }
+    th, td {
+      border: 1px solid #333;
+      padding: 10px;
+    }
   </style>
 </head>
 <body>
@@ -30,14 +40,37 @@
   <video id="inputVideo" controls></video>
   <canvas id="outputCanvas"></canvas>
 
+  <table>
+    <thead>
+      <tr>
+        <th>Vitesse actuelle (px/s)</th>
+        <th>Min</th>
+        <th>Max</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td id="velCurrent">-</td>
+        <td id="velMin">-</td>
+        <td id="velMax">-</td>
+      </tr>
+    </tbody>
+  </table>
+
   <script>
     const videoElement = document.getElementById('inputVideo');
     const canvasElement = document.getElementById('outputCanvas');
     const canvasCtx = canvasElement.getContext('2d');
     const uploadInput = document.getElementById('uploadInput');
 
+    const velCurrentEl = document.getElementById('velCurrent');
+    const velMinEl = document.getElementById('velMin');
+    const velMaxEl = document.getElementById('velMax');
+
     let lastWrist = null;
     let lastTime = null;
+    let minVelocity = Infinity;
+    let maxVelocity = 0;
 
     uploadInput.addEventListener('change', (event) => {
       const file = event.target.files[0];
@@ -45,6 +78,14 @@
         const url = URL.createObjectURL(file);
         videoElement.src = url;
         videoElement.load();
+        // Reset stats
+        lastWrist = null;
+        lastTime = null;
+        minVelocity = Infinity;
+        maxVelocity = 0;
+        velCurrentEl.textContent = '-';
+        velMinEl.textContent = '-';
+        velMaxEl.textContent = '-';
       }
     });
 
@@ -75,7 +116,7 @@
         drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#00FF00', lineWidth: 3 });
         drawLandmarks(canvasCtx, results.poseLandmarks, { color: '#FF0000', lineWidth: 2 });
 
-        const wrist = results.poseLandmarks[16]; // 16 = RIGHT_WRIST
+        const wrist = results.poseLandmarks[16]; // RIGHT_WRIST
         const now = performance.now();
 
         if (lastWrist && lastTime) {
@@ -85,9 +126,16 @@
           const dt = (now - lastTime) / 1000;
           const velocity = distance / dt;
 
-          canvasCtx.fillStyle = 'yellow';
-          canvasCtx.font = '20px sans-serif';
-          canvasCtx.fillText(`Vitesse main droite : ${velocity.toFixed(2)} px/s`, 20, 30);
+          velCurrentEl.textContent = velocity.toFixed(2);
+
+          if (velocity < minVelocity) {
+            minVelocity = velocity;
+            velMinEl.textContent = minVelocity.toFixed(2);
+          }
+          if (velocity > maxVelocity) {
+            maxVelocity = velocity;
+            velMaxEl.textContent = maxVelocity.toFixed(2);
+          }
         }
 
         lastWrist = wrist;
