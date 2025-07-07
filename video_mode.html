@@ -1,80 +1,95 @@
+
 <!DOCTYPE html>
-<html lang="fr">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <title>Analyse Vidéo avec Landmarks</title>
+  <title>Analyse Vidéo - MediaPipe Pose</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
   <style>
     body {
-      background: #111;
-      color: white;
-      text-align: center;
       font-family: sans-serif;
-    }
-    #videoWrapper {
-      position: relative;
-      display: inline-block;
-    }
-    video, canvas {
-      max-width: 100%;
-      width: 640px;
-      height: auto;
+      background-color: #222;
+      color: #eee;
+      text-align: center;
+      padding: 20px;
     }
     canvas {
-      position: absolute;
-      top: 0;
-      left: 0;
-      pointer-events: none;
+      border: 1px solid #eee;
+    }
+    video {
+      display: none;
     }
   </style>
 </head>
 <body>
+  <h1>Analyse biomécanique (vidéo)</h1>
+  <input type="file" id="videoUpload" accept="video/*" />
+  <br><br>
+  <button onclick="videoElement.play()">▶️ Lancer la vidéo</button>
+  <br><br>
+  <canvas id="outputCanvas" width="640" height="480"></canvas>
+  <video id="inputVideo" controls muted></video>
 
-  <h1>🧠 Analyse vidéo + Landmarks</h1>
-  <input type="file" id="videoUpload" accept="video/*"><br><br>
-
-  <div id="videoWrapper">
-    <video id="inputVideo" controls></video>
-    <canvas id="outputCanvas"></canvas>
-  </div>
-
-  <script type="module">
-    import {
-      Pose,
-      POSE_LANDMARKS,
-      drawConnectors,
-      drawLandmarks
-    } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3';
-
-    let pose, canvasCtx;
-
+  <script>
     const videoElement = document.getElementById('inputVideo');
     const canvasElement = document.getElementById('outputCanvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    const uploadInput = document.getElementById('videoUpload');
 
-    // Charger le modèle MediaPipe Pose
-    async function setupPose() {
-      pose = await Pose.createFromOptions({
-        runningMode: 'VIDEO',
-        modelAssetPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose_landmark_full.tflite'
+    // Initialisation de MediaPipe Pose
+    const pose = new Pose.Pose({
+      locateFile: (file) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`;
+      }
+    });
+
+    pose.setOptions({
+      modelComplexity: 1,
+      smoothLandmarks: true,
+      enableSegmentation: false,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    pose.onResults(results => {
+      canvasCtx.save();
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+      if (results.poseLandmarks) {
+        drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#00FF00', lineWidth: 4 });
+        drawLandmarks(canvasCtx, results.poseLandmarks, { color: '#FF0000', lineWidth: 2 });
+      }
+      canvasCtx.restore();
+    });
+
+    uploadInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        const url = URL.createObjectURL(file);
+        videoElement.src = url;
+        videoElement.load();
+        videoElement.addEventListener('loadeddata', () => {
+          console.log("Vidéo chargée");
+          videoElement.width = videoElement.videoWidth;
+          videoElement.height = videoElement.videoHeight;
+          canvasElement.width = videoElement.videoWidth;
+          canvasElement.height = videoElement.videoHeight;
+          processVideo();
+        });
+      }
+    });
+
+    async function processVideo() {
+      videoElement.addEventListener('play', () => {
+        function analyzeFrame() {
+          if (!videoElement.paused && !videoElement.ended) {
+            pose.send({ image: videoElement });
+            requestAnimationFrame(analyzeFrame);
+          }
+        }
+        analyzeFrame();
       });
     }
-
-    // Synchroniser lecture vidéo + analyse MediaPipe
-    function startLandmarkLoop() {
-      const render = async () => {
-        if (videoElement.paused || videoElement.ended) return;
-        const timestamp = videoElement.currentTime * 1000;
-
-        const result = await pose.detectForVideo(videoElement, timestamp);
-        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-        if (result.landmarks) {
-          drawConnectors(canvasCtx, result.landmarks, POSE_LANDMARKS);
-          drawLandmarks(canvasCtx, result.landmarks);
-        }
-        requestAnimationFrame(render);
-      };
-      requestAnimationFrame(render);
-    }
-
-    document.getElementById('videoUpload').addEventListener('change', async (event) => {
-      const file = event.target.files[0];
-      if (!file) return;
+  </script>
+</body>
+</html>
