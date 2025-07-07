@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <title>Analyse d'une vidéo (MediaPipe)</title>
+  <meta charset="UTF-8">
+  <title>Démo MediaPipe Pose - Vidéo</title>
   <style>
     body {
       margin: 0;
@@ -30,6 +30,10 @@
       color: lime;
     }
   </style>
+
+  <!-- ✅ Libs MediaPipe via balises <script> (non module) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
 </head>
 <body>
   <h2>Analyse d'une vidéo (MediaPipe)</h2>
@@ -47,14 +51,7 @@
 
   <div id="velocityDisplay">Vélocité main droite : 0.00 px/frame</div>
 
-  <script type="module">
-    import { Pose } from 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js';
-    import { POSE_CONNECTIONS } from 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose_connections.js';
-    import {
-      drawConnectors,
-      drawLandmarks
-    } from 'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js';
-
+  <script>
     const video = document.getElementById('inputVideo');
     const canvas = document.getElementById('outputCanvas');
     const ctx = canvas.getContext('2d');
@@ -62,9 +59,8 @@
 
     let previousWrist = null;
 
-    const pose = new Pose({
-      locateFile: (file) =>
-        `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`,
+    const pose = new Pose.Pose({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
     });
 
     pose.setOptions({
@@ -76,6 +72,12 @@
     });
 
     pose.onResults(onResults);
+
+    // Définition manuelle de POSE_CONNECTIONS (haut du corps)
+    const POSE_CONNECTIONS = [
+      [11, 13], [13, 15], [12, 14], [14, 16],
+      [11, 12], [23, 24], [11, 23], [12, 24]
+    ];
 
     function calculateVelocity(current, previous) {
       const dx = current.x - previous.x;
@@ -105,13 +107,13 @@
 
         previousWrist = { ...rightWrist };
       }
+
       ctx.restore();
     }
 
     document.getElementById('videoInput').addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
-
       const fileURL = URL.createObjectURL(file);
       video.src = fileURL;
       await video.load();
