@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html>
 <head>
@@ -37,6 +36,9 @@
     const canvasCtx = canvasElement.getContext('2d');
     const uploadInput = document.getElementById('uploadInput');
 
+    let lastWrist = null;
+    let lastTime = null;
+
     uploadInput.addEventListener('change', (event) => {
       const file = event.target.files[0];
       if (file) {
@@ -68,10 +70,30 @@
       canvasCtx.save();
       canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
       canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
       if (results.poseLandmarks) {
         drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#00FF00', lineWidth: 3 });
         drawLandmarks(canvasCtx, results.poseLandmarks, { color: '#FF0000', lineWidth: 2 });
+
+        const wrist = results.poseLandmarks[16]; // 16 = RIGHT_WRIST
+        const now = performance.now();
+
+        if (lastWrist && lastTime) {
+          const dx = (wrist.x - lastWrist.x) * canvasElement.width;
+          const dy = (wrist.y - lastWrist.y) * canvasElement.height;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          const dt = (now - lastTime) / 1000;
+          const velocity = distance / dt;
+
+          canvasCtx.fillStyle = 'yellow';
+          canvasCtx.font = '20px sans-serif';
+          canvasCtx.fillText(`Vitesse main droite : ${velocity.toFixed(2)} px/s`, 20, 30);
+        }
+
+        lastWrist = wrist;
+        lastTime = now;
       }
+
       canvasCtx.restore();
     }
 
