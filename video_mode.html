@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Analyse Vidéo - Vitesse main droite</title>
+  <meta charset="UTF-8" />
+  <title>Analyse Vidéo - Vitesse Main Droite</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -11,42 +12,89 @@
       background: #121212;
       color: #fff;
       text-align: center;
-      padding: 1rem;
+      margin: 0;
+      padding: 2rem;
     }
     canvas, video {
       max-width: 90vw;
+      height: auto;
     }
-    #chartContainer {
-      width: 90vw;
-      height: 300px;
-      margin: 2rem auto;
+    #outputCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+    #container {
+      position: relative;
+      display: inline-block;
+    }
+    #info {
+      margin-top: 1rem;
     }
   </style>
 </head>
 <body>
-  <h1>Vitesse linéaire de la main droite (en m/s)</h1>
-  <input type="file" accept="video/*" id="uploadInput" />
-  <br><br>
-  <video id="inputVideo" controls></video>
-  <canvas id="outputCanvas"></canvas>
+  <h1>Analyse de la vitesse de la main droite</h1>
 
-  <div id="chartContainer">
-    <canvas id="velocityChart"></canvas>
+  <input type="file" accept="video/*" id="uploadInput" />
+  <div id="container">
+    <video id="inputVideo" controls></video>
+    <canvas id="outputCanvas"></canvas>
   </div>
+
+  <div id="info">
+    <p><strong>Vitesse maximale :</strong> <span id="maxSpeed">-</span> m/s</p>
+    <p><strong>Temps de vitesse max :</strong> <span id="maxTime">-</span> s</p>
+    <button id="downloadFrameBtn" style="display:none;">📸 Télécharger la frame</button>
+  </div>
+
+  <canvas id="chartCanvas" height="100"></canvas>
 
   <script>
     const video = document.getElementById('inputVideo');
     const canvas = document.getElementById('outputCanvas');
     const ctx = canvas.getContext('2d');
     const uploadInput = document.getElementById('uploadInput');
+    const maxSpeedDisplay = document.getElementById('maxSpeed');
+    const maxTimeDisplay = document.getElementById('maxTime');
+    const downloadFrameBtn = document.getElementById('downloadFrameBtn');
 
-    let lastRightWrist = null;
     let lastTimestamp = null;
-    let velocityBuffer = [];
-    const maxBufferLength = 5;
+    let lastPos = null;
+    let maxSpeed = 0;
+    let maxFrame = null;
+    let maxTime = 0;
+    const speeds = [];
+    const times = [];
 
-    const timeSeries = [];
-    const velocitySeries = [];
+    const chart = new Chart(document.getElementById('chartCanvas'), {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [{
+          label: 'Vitesse main droite (m/s)',
+          data: [],
+          borderWidth: 2,
+          borderColor: '#4bc0c0',
+          fill: false,
+          tension: 0.2,
+        }]
+      },
+      options: {
+        scales: {
+          x: { title: { display: true, text: 'Temps (s)' } },
+          y: { title: { display: true, text: 'Vitesse (m/s)' }, min: 0, max: 20 }
+        }
+      }
+    });
+
+    uploadInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      video.src = url;
+      video.load();
+    });
 
     const pose = new Pose({
       locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
@@ -65,7 +113,6 @@
     function onResults(results) {
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
-
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
@@ -73,46 +120,50 @@
         drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#00FF00', lineWidth: 3 });
         drawLandmarks(ctx, results.poseLandmarks, { color: '#FF0000', lineWidth: 2 });
 
-        const wrist = results.poseLandmarks[16]; // Poignet droit
-        const timestamp = performance.now();
+        const rightWrist = results.poseLandmarks[16];
+        const timestamp = video.currentTime;
 
-        if (lastRightWrist && lastTimestamp) {
-          const dx = (wrist.x - lastRightWrist.x);
-          const dy = (wrist.y - lastRightWrist.y);
-          const dz = (wrist.z - lastRightWrist.z);
-          const dt = (timestamp - lastTimestamp) / 1000; // en secondes
+        if (rightWrist && lastPos && lastTimestamp !== null) {
+          const dx = rightWrist.x - lastPos.x;
+          const dy = rightWrist.y - lastPos.y;
+          const dz = rightWrist.z - lastPos.z;
+          const dt = timestamp - lastTimestamp;
+          const distance = Math.sqrt(dx * dx + dy * dy + dz * dz); // en fraction du cadre
+          const speed = (distance / dt) * video.videoWidth; // en px/s
 
-          const dist_px = Math.sqrt(dx * dx + dy * dy + dz * dz);
-          const distance_m = dist_px * 1.8; // facteur d'échelle estimé
-          const velocity = distance_m / dt;
+          // Conversion en m/s
+          const pixelToMeter = 1.7 / video.videoHeight; // approximativement taille humaine
+          const speedMs = speed * pixelToMeter;
 
-          // Ajout au buffer de filtrage
-          velocityBuffer.push(velocity);
-          if (velocityBuffer.length > maxBufferLength) velocityBuffer.shift();
-          const avgVelocity = velocityBuffer.reduce((a, b) => a + b, 0) / velocityBuffer.length;
+          speeds.push(speedMs);
+          times.push(timestamp);
+          chart.data.labels.push(timestamp.toFixed(2));
+          chart.data.datasets[0].data.push(speedMs);
+          chart.update();
 
-          // Limite supérieure : 50 m/s (pour ignorer les spikes)
-          const cappedVelocity = Math.min(avgVelocity, 50);
+          if (speedMs > maxSpeed) {
+            maxSpeed = speedMs;
+            maxTime = timestamp;
+            maxFrame = new Image();
+            maxFrame.src = canvas.toDataURL('image/png');
 
-          const time = (video.currentTime).toFixed(2);
-          timeSeries.push(time);
-          velocitySeries.push(cappedVelocity);
-          velocityChart.data.labels = timeSeries;
-          velocityChart.data.datasets[0].data = velocitySeries;
-          velocityChart.update();
+            maxSpeedDisplay.textContent = speedMs.toFixed(2);
+            maxTimeDisplay.textContent = timestamp.toFixed(2);
+            downloadFrameBtn.style.display = 'inline-block';
+          }
         }
 
-        lastRightWrist = wrist;
+        lastPos = rightWrist;
         lastTimestamp = timestamp;
       }
     }
 
-    uploadInput.addEventListener('change', (event) => {
-      const file = event.target.files[0];
-      if (file) {
-        const url = URL.createObjectURL(file);
-        video.src = url;
-        video.load();
+    downloadFrameBtn.addEventListener('click', () => {
+      if (maxFrame) {
+        const a = document.createElement('a');
+        a.href = maxFrame.src;
+        a.download = 'frame_vitesse_max.png';
+        a.click();
       }
     });
 
@@ -124,42 +175,6 @@
         }
       };
       requestAnimationFrame(processFrame);
-    });
-
-    // Chart.js configuration
-    const ctxChart = document.getElementById('velocityChart').getContext('2d');
-    const velocityChart = new Chart(ctxChart, {
-      type: 'line',
-      data: {
-        labels: [],
-        datasets: [{
-          label: 'Vitesse (m/s)',
-          data: [],
-          borderColor: 'orange',
-          borderWidth: 2,
-          fill: false,
-          tension: 0.3
-        }]
-      },
-      options: {
-        responsive: true,
-        scales: {
-          x: {
-            title: {
-              display: true,
-              text: 'Temps (s)'
-            }
-          },
-          y: {
-            min: 0,
-            max: 60,
-            title: {
-              display: true,
-              text: 'Vitesse (m/s)'
-            }
-          }
-        }
-      }
     });
   </script>
 </body>
