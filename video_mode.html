@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Analyse vidéo (landmarks + vélocité)</title>
+  <title>Analyse vidéo (MediaPipe)</title>
   <style>
     body {
       margin: 0;
@@ -25,8 +25,8 @@
       margin-top: 20px;
     }
     #velocityDisplay {
-      margin-top: 10px;
-      font-size: 1.2em;
+      margin-top: 20px;
+      font-size: 20px;
       color: #0f0;
     }
   </style>
@@ -40,28 +40,28 @@
     <button id="pauseBtn">⏸️ Pause</button>
   </div>
 
-  <div id="velocityDisplay">Vélocité main droite : 0.00 px/s</div>
-
   <div style="position: relative;">
     <video id="inputVideo"></video>
     <canvas id="outputCanvas"></canvas>
   </div>
 
+  <div id="velocityDisplay">Vélocité main droite : 0.00 px/s</div>
+
   <script type="module">
-    import { Pose, POSE_CONNECTIONS } from 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469409/pose.js';
-    import { drawConnectors, drawLandmarks } from 'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.5.1675469409/drawing_utils.js';
+    import { Pose } from 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.4.1646424915/pose.js';
+    import {
+      drawConnectors,
+      drawLandmarks
+    } from 'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.4.1646424915/drawing_utils.js';
 
     const video = document.getElementById('inputVideo');
     const canvas = document.getElementById('outputCanvas');
     const ctx = canvas.getContext('2d');
     const velocityDisplay = document.getElementById('velocityDisplay');
 
-    let lastPosition = null;
-    let lastTimestamp = null;
-
     const pose = new Pose({
       locateFile: (file) =>
-        `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469409/${file}`,
+        `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.4.1646424915/${file}`,
     });
 
     pose.setOptions({
@@ -74,6 +74,9 @@
 
     pose.onResults(onResults);
 
+    let lastRightHand = null;
+    let lastTime = null;
+
     function onResults(results) {
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
@@ -82,5 +85,56 @@
       ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
       if (results.poseLandmarks) {
-        drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#00FF00', lineWidth: 2 });
-        drawLandmarks(ctx, results.poseLandma
+        drawConnectors(ctx, results.poseLandmarks, Pose.POSE_CONNECTIONS,
+          { color: '#00FF00', lineWidth: 2 });
+        drawLandmarks(ctx, results.poseLandmarks,
+          { color: '#FF0000', lineWidth: 1 });
+
+        const now = performance.now();
+        const rightHand = results.poseLandmarks[16]; // main droite
+
+        if (lastRightHand && lastTime) {
+          const dt = (now - lastTime) / 1000;
+          const dx = rightHand.x - lastRightHand.x;
+          const dy = rightHand.y - lastRightHand.y;
+          const dz = rightHand.z - lastRightHand.z;
+          const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+          const velocity = distance / dt;
+          velocityDisplay.textContent = `Vélocité main droite : ${velocity.toFixed(2)} px/s`;
+        }
+
+        lastRightHand = rightHand;
+        lastTime = now;
+      }
+      ctx.restore();
+    }
+
+    document.getElementById('videoInput').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const fileURL = URL.createObjectURL(file);
+      video.src = fileURL;
+      await video.load();
+    });
+
+    document.getElementById('playBtn').addEventListener('click', () => {
+      video.play();
+    });
+
+    document.getElementById('pauseBtn').addEventListener('click', () => {
+      video.pause();
+    });
+
+    video.addEventListener('play', async () => {
+      async function processFrame() {
+        if (!video.paused && !video.ended) {
+          await pose.send({ image: video });
+          requestAnimationFrame(processFrame);
+        }
+      }
+      requestAnimationFrame(processFrame);
+    });
+  </script>
+</body>
+</html>
