@@ -1,10 +1,9 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Analyse Vidéo - MediaPipe Pose</title>
+  <title>Analyse Vidéo - Vélocité (m/s)</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
   <style>
     body {
       font-family: sans-serif;
@@ -21,54 +20,33 @@
     #uploadInput {
       margin-top: 1rem;
     }
-    table {
-      margin: 20px auto;
-      border-collapse: collapse;
-      background: #1e1e1e;
-      color: #fff;
-    }
-    th, td {
-      border: 1px solid #333;
-      padding: 10px;
+    #metrics {
+      margin-top: 1rem;
+      font-size: 1.2rem;
+      background: #222;
+      padding: 1rem;
+      border-radius: 10px;
+      display: inline-block;
     }
   </style>
 </head>
 <body>
-  <h1>Analyse biomécanique à partir d'une vidéo</h1>
+  <h1>Analyse biomécanique (vitesse main droite en m/s)</h1>
   <input type="file" accept="video/*" id="uploadInput" />
   <br><br>
   <video id="inputVideo" controls></video>
   <canvas id="outputCanvas"></canvas>
-
-  <table>
-    <thead>
-      <tr>
-        <th>Vitesse actuelle (px/s)</th>
-        <th>Min</th>
-        <th>Max</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td id="velCurrent">-</td>
-        <td id="velMin">-</td>
-        <td id="velMax">-</td>
-      </tr>
-    </tbody>
-  </table>
+  <div id="metrics">Vitesse : 0.00 m/s (min: 0.00, max: 0.00)</div>
 
   <script>
     const videoElement = document.getElementById('inputVideo');
     const canvasElement = document.getElementById('outputCanvas');
     const canvasCtx = canvasElement.getContext('2d');
     const uploadInput = document.getElementById('uploadInput');
+    const metricsDiv = document.getElementById('metrics');
 
-    const velCurrentEl = document.getElementById('velCurrent');
-    const velMinEl = document.getElementById('velMin');
-    const velMaxEl = document.getElementById('velMax');
-
-    let lastWrist = null;
-    let lastTime = null;
+    let lastRightWrist = null;
+    let lastTimestamp = null;
     let minVelocity = Infinity;
     let maxVelocity = 0;
 
@@ -78,14 +56,6 @@
         const url = URL.createObjectURL(file);
         videoElement.src = url;
         videoElement.load();
-        // Reset stats
-        lastWrist = null;
-        lastTime = null;
-        minVelocity = Infinity;
-        maxVelocity = 0;
-        velCurrentEl.textContent = '-';
-        velMinEl.textContent = '-';
-        velMaxEl.textContent = '-';
       }
     });
 
@@ -104,6 +74,13 @@
 
     pose.onResults(onResults);
 
+    function getDistance(a, b) {
+      return Math.sqrt(
+        (a.x - b.x) ** 2 +
+        (a.y - b.y) ** 2
+      );
+    }
+
     function onResults(results) {
       canvasElement.width = videoElement.videoWidth;
       canvasElement.height = videoElement.videoHeight;
@@ -116,30 +93,30 @@
         drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#00FF00', lineWidth: 3 });
         drawLandmarks(canvasCtx, results.poseLandmarks, { color: '#FF0000', lineWidth: 2 });
 
-        const wrist = results.poseLandmarks[16]; // RIGHT_WRIST
         const now = performance.now();
+        const rightWrist = results.poseLandmarks[16]; // poignet droit
+        const rightShoulder = results.poseLandmarks[12];
+        const rightHip = results.poseLandmarks[24];
 
-        if (lastWrist && lastTime) {
-          const dx = (wrist.x - lastWrist.x) * canvasElement.width;
-          const dy = (wrist.y - lastWrist.y) * canvasElement.height;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-          const dt = (now - lastTime) / 1000;
-          const velocity = distance / dt;
+        if (lastRightWrist && lastTimestamp && rightShoulder && rightHip) {
+          const deltaTime = (now - lastTimestamp) / 1000; // en secondes
+          const dx = rightWrist.x - lastRightWrist.x;
+          const dy = rightWrist.y - lastRightWrist.y;
+          const d = Math.sqrt(dx * dx + dy * dy);
 
-          velCurrentEl.textContent = velocity.toFixed(2);
+          const pixelDistRef = getDistance(rightShoulder, rightHip); // en coordonnées normalisées
+          const pixelToMeter = 0.45 / pixelDistRef;
 
-          if (velocity < minVelocity) {
-            minVelocity = velocity;
-            velMinEl.textContent = minVelocity.toFixed(2);
-          }
-          if (velocity > maxVelocity) {
-            maxVelocity = velocity;
-            velMaxEl.textContent = maxVelocity.toFixed(2);
-          }
+          const velocity = (d * pixelToMeter) / deltaTime;
+
+          minVelocity = Math.min(minVelocity, velocity);
+          maxVelocity = Math.max(maxVelocity, velocity);
+
+          metricsDiv.innerText = `Vitesse main droite : ${velocity.toFixed(2)} m/s (min: ${minVelocity.toFixed(2)}, max: ${maxVelocity.toFixed(2)})`;
         }
 
-        lastWrist = wrist;
-        lastTime = now;
+        lastRightWrist = rightWrist;
+        lastTimestamp = now;
       }
 
       canvasCtx.restore();
