@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>Démo MediaPipe Pose - Vidéo</title>
+  <title>Analyse vidéo avec vélocité</title>
   <style>
     body {
       margin: 0;
@@ -31,12 +31,12 @@
     }
   </style>
 
-  <!-- ✅ Libs MediaPipe non-modulaires -->
+  <!-- MediaPipe -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 </head>
 <body>
-  <h2>Analyse d'une vidéo (MediaPipe)</h2>
+  <h2>Analyse vidéo (MediaPipe)</h2>
 
   <input type="file" id="videoInput" accept="video/*" />
   <div id="controls">
@@ -98,13 +98,14 @@
           { color: '#FF0000', lineWidth: 1 });
 
         const rightWrist = results.poseLandmarks[16];
-
-        if (previousWrist) {
+        if (rightWrist && rightWrist.visibility > 0.5 && previousWrist) {
           const velocity = calculateVelocity(rightWrist, previousWrist);
           velocityDisplay.textContent = `Vélocité main droite : ${velocity.toFixed(2)} px/frame`;
         }
 
-        previousWrist = { ...rightWrist };
+        if (rightWrist && rightWrist.visibility > 0.5) {
+          previousWrist = { ...rightWrist };
+        }
       }
 
       ctx.restore();
@@ -126,13 +127,13 @@
       video.pause();
     });
 
-    video.addEventListener('play', async () => {
-      async function processFrame() {
+    video.addEventListener('play', () => {
+      const processFrame = async () => {
         if (!video.paused && !video.ended) {
           await pose.send({ image: video });
           requestAnimationFrame(processFrame);
         }
-      }
+      };
       requestAnimationFrame(processFrame);
     });
   </script>
