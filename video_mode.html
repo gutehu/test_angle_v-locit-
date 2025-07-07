@@ -1,46 +1,105 @@
+
 <!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
-  <title>Analyse Vidéo Golf</title>
+  <title>Analyse vidéo - Golf</title>
   <style>
     body {
-      font-family: sans-serif;
       background: #111;
       color: #eee;
+      font-family: sans-serif;
       text-align: center;
       padding: 20px;
     }
     video {
       max-width: 90%;
-      height: auto;
-      margin-top: 20px;
       border: 2px solid #eee;
+      margin: 20px 0;
+    }
+    canvas {
+      position: absolute;
+      left: 0;
+      top: 0;
+      z-index: 10;
+    }
+    #container {
+      position: relative;
+      display: inline-block;
     }
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
-  <h1>📹 Analyse de swing de golf</h1>
-  <p>Sélectionne une vidéo MP4 de swing vue de face :</p>
-
+  <h1>Analyse biomécanique d'un swing (vidéo)</h1>
   <input type="file" id="videoInput" accept="video/*" />
-  <br>
-  <video id="uploadedVideo" controls></video>
+  <br />
+
+  <div id="container">
+    <video id="uploadedVideo" controls muted></video>
+    <canvas id="outputCanvas"></canvas>
+  </div>
+
+  <button id="startAnalysis">Début de l'analyse</button>
+  <button id="stopAnalysis">Fin de l'analyse</button>
+
+  <div>
+    <canvas id="chartCanvas" width="600" height="300"></canvas>
+  </div>
 
   <script>
-    const input = document.getElementById('videoInput');
     const video = document.getElementById('uploadedVideo');
+    const canvas = document.getElementById('outputCanvas');
+    const ctx = canvas.getContext('2d');
+    const videoInput = document.getElementById('videoInput');
+    let isAnalyzing = false;
 
-    input.addEventListener('change', (event) => {
-      const file = event.target.files[0];
+    videoInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
       if (file) {
         const url = URL.createObjectURL(file);
         video.src = url;
-        video.load();
-        video.play();
       }
     });
+
+    const pose = new Pose.Pose({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
+    });
+    pose.setOptions({
+      modelComplexity: 1,
+      smoothLandmarks: true,
+      enableSegmentation: false,
+      smoothSegmentation: false,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    pose.onResults((results) => {
+      if (!isAnalyzing) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      drawConnectors(ctx, results.poseLandmarks, Pose.POSE_CONNECTIONS, { color: '#0f0', lineWidth: 4 });
+      drawLandmarks(ctx, results.poseLandmarks, { color: '#ff0', lineWidth: 2 });
+      // TODO: Ajouter les calculs biomécaniques ici
+    });
+
+    document.getElementById('startAnalysis').onclick = () => {
+      isAnalyzing = true;
+      requestVideoFrame();
+    };
+    document.getElementById('stopAnalysis').onclick = () => {
+      isAnalyzing = false;
+    };
+
+    function requestVideoFrame() {
+      if (!isAnalyzing || video.paused || video.ended) return;
+      pose.send({ image: video });
+      requestAnimationFrame(requestVideoFrame);
+    }
   </script>
 
 </body>
