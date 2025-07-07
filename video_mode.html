@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>Analyse Vidéo - Vitesse Main Droite (Améliorée)</title>
+  <title>Analyse Vidéo - Vitesse Main Droite (Échantillonnage Précis)</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -28,25 +28,27 @@
       position: relative;
       display: inline-block;
     }
-    #info {
-      margin-top: 1rem;
-    }
     #controls {
       margin: 1rem 0;
       padding: 1rem;
       background: #1e1e1e;
       border-radius: 8px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 1rem;
     }
     .control-group {
-      margin: 0.5rem 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
     }
     label {
-      display: inline-block;
-      width: 200px;
-      text-align: left;
+      font-weight: bold;
+      margin-bottom: 0.5rem;
     }
     input[type="range"] {
       width: 200px;
+      margin-bottom: 0.25rem;
     }
     .stats {
       display: flex;
@@ -59,36 +61,103 @@
       background: #2a2a2a;
       border-radius: 4px;
       margin: 0.25rem;
+      min-width: 120px;
+    }
+    .processing-info {
+      background: #1a472a;
+      padding: 1rem;
+      border-radius: 8px;
+      margin: 1rem 0;
+    }
+    .btn-group {
+      margin: 1rem 0;
+    }
+    button {
+      padding: 0.5rem 1rem;
+      margin: 0.25rem;
+      background: #4a4a4a;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #5a5a5a;
+    }
+    button:disabled {
+      background: #2a2a2a;
+      cursor: not-allowed;
+    }
+    .progress-bar {
+      width: 100%;
+      height: 20px;
+      background: #333;
+      border-radius: 10px;
+      overflow: hidden;
+      margin: 0.5rem 0;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #4bc0c0, #36a0a0);
+      width: 0%;
+      transition: width 0.3s ease;
     }
   </style>
 </head>
 <body>
-  <h1>Analyse de la vitesse de la main droite (Version Améliorée)</h1>
+  <h1>Analyse de la vitesse de la main droite (Échantillonnage Précis)</h1>
 
   <input type="file" accept="video/*" id="uploadInput" />
   
   <div id="controls">
     <div class="control-group">
-      <label>Seuil de confiance:</label>
-      <input type="range" id="confidenceSlider" min="0.1" max="1" step="0.1" value="0.7">
-      <span id="confidenceValue">0.7</span>
+      <label>Fréquence d'analyse (FPS):</label>
+      <input type="range" id="analysisFrequency" min="10" max="120" step="10" value="60">
+      <span id="frequencyValue">60</span> FPS
     </div>
     <div class="control-group">
       <label>Fenêtre de lissage:</label>
-      <input type="range" id="smoothingSlider" min="3" max="15" step="2" value="7">
-      <span id="smoothingValue">7</span>
+      <input type="range" id="smoothingWindow" min="3" max="21" step="2" value="9">
+      <span id="smoothingValue">9</span> frames
     </div>
     <div class="control-group">
-      <label>Seuil de vitesse (m/s):</label>
-      <input type="range" id="speedThresholdSlider" min="0.1" max="2" step="0.1" value="0.5">
-      <span id="speedThresholdValue">0.5</span>
+      <label>Filtre passe-bas (Hz):</label>
+      <input type="range" id="lowPassFilter" min="1" max="20" step="1" value="10">
+      <span id="filterValue">10</span> Hz
+    </div>
+    <div class="control-group">
+      <label>Seuil de confiance:</label>
+      <input type="range" id="confidenceThreshold" min="0.3" max="0.9" step="0.1" value="0.6">
+      <span id="confidenceValue">0.6</span>
     </div>
     <div class="control-group">
       <label>Taille de référence (m):</label>
-      <input type="range" id="referenceSizeSlider" min="1.5" max="2.0" step="0.1" value="1.7">
-      <span id="referenceSizeValue">1.7</span>
+      <input type="range" id="referenceSize" min="1.5" max="2.0" step="0.05" value="1.7">
+      <span id="referenceSizeValue">1.7</span> m
     </div>
-    <button id="resetBtn">🔄 Reset</button>
+    <div class="control-group">
+      <label>Interpolation:</label>
+      <input type="checkbox" id="enableInterpolation" checked>
+      <span>Activer</span>
+    </div>
+  </div>
+
+  <div class="btn-group">
+    <button id="startAnalysis">▶️ Démarrer l'analyse</button>
+    <button id="pauseAnalysis">⏸️ Pause</button>
+    <button id="resetAnalysis">🔄 Reset</button>
+    <button id="exportData" disabled>📊 Exporter CSV</button>
+  </div>
+
+  <div id="processingInfo" class="processing-info" style="display: none;">
+    <div>Analyse en cours...</div>
+    <div class="progress-bar">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+    <div id="processingStats">
+      Frames analysées: <span id="processedFrames">0</span> / <span id="totalFrames">0</span>
+      | Vitesse: <span id="processingSpeed">0</span> FPS
+    </div>
   </div>
 
   <div id="container">
@@ -102,151 +171,246 @@
       <span id="maxSpeed">-</span> m/s
     </div>
     <div class="stat-item">
-      <strong>Temps de vitesse max:</strong><br>
-      <span id="maxTime">-</span> s
-    </div>
-    <div class="stat-item">
       <strong>Vitesse moyenne:</strong><br>
       <span id="avgSpeed">-</span> m/s
     </div>
     <div class="stat-item">
-      <strong>Confiance moyenne:</strong><br>
+      <strong>Écart-type:</strong><br>
+      <span id="stdDev">-</span> m/s
+    </div>
+    <div class="stat-item">
+      <strong>Confiance moy.:</strong><br>
       <span id="avgConfidence">-</span>%
     </div>
     <div class="stat-item">
+      <strong>Fréquence réelle:</strong><br>
+      <span id="actualFreq">-</span> Hz
+    </div>
+    <div class="stat-item">
       <strong>Points valides:</strong><br>
-      <span id="validPoints">-</span>
+      <span id="validRatio">-</span>%
     </div>
   </div>
 
-  <div id="info">
-    <button id="downloadFrameBtn" style="display:none;">📸 Télécharger la frame</button>
-    <button id="exportDataBtn" style="display:none;">📊 Exporter les données</button>
-  </div>
-
-  <canvas id="chartCanvas" height="100"></canvas>
+  <canvas id="chartCanvas" height="120"></canvas>
 
   <script>
-    // Configuration et variables globales
+    // Configuration
     const video = document.getElementById('inputVideo');
     const canvas = document.getElementById('outputCanvas');
     const ctx = canvas.getContext('2d');
     const uploadInput = document.getElementById('uploadInput');
     
     // Contrôles
-    const confidenceSlider = document.getElementById('confidenceSlider');
-    const smoothingSlider = document.getElementById('smoothingSlider');
-    const speedThresholdSlider = document.getElementById('speedThresholdSlider');
-    const referenceSizeSlider = document.getElementById('referenceSizeSlider');
-    const resetBtn = document.getElementById('resetBtn');
+    const analysisFrequency = document.getElementById('analysisFrequency');
+    const smoothingWindow = document.getElementById('smoothingWindow');
+    const lowPassFilter = document.getElementById('lowPassFilter');
+    const confidenceThreshold = document.getElementById('confidenceThreshold');
+    const referenceSize = document.getElementById('referenceSize');
+    const enableInterpolation = document.getElementById('enableInterpolation');
+    
+    // Boutons
+    const startAnalysisBtn = document.getElementById('startAnalysis');
+    const pauseAnalysisBtn = document.getElementById('pauseAnalysis');
+    const resetAnalysisBtn = document.getElementById('resetAnalysis');
+    const exportDataBtn = document.getElementById('exportData');
     
     // Affichage des valeurs
-    const confidenceValue = document.getElementById('confidenceValue');
+    const frequencyValue = document.getElementById('frequencyValue');
     const smoothingValue = document.getElementById('smoothingValue');
-    const speedThresholdValue = document.getElementById('speedThresholdValue');
+    const filterValue = document.getElementById('filterValue');
+    const confidenceValue = document.getElementById('confidenceValue');
     const referenceSizeValue = document.getElementById('referenceSizeValue');
     
     // Statistiques
     const maxSpeedDisplay = document.getElementById('maxSpeed');
-    const maxTimeDisplay = document.getElementById('maxTime');
     const avgSpeedDisplay = document.getElementById('avgSpeed');
+    const stdDevDisplay = document.getElementById('stdDev');
     const avgConfidenceDisplay = document.getElementById('avgConfidence');
-    const validPointsDisplay = document.getElementById('validPoints');
+    const actualFreqDisplay = document.getElementById('actualFreq');
+    const validRatioDisplay = document.getElementById('validRatio');
     
-    const downloadFrameBtn = document.getElementById('downloadFrameBtn');
-    const exportDataBtn = document.getElementById('exportDataBtn');
+    // Progression
+    const processingInfo = document.getElementById('processingInfo');
+    const progressFill = document.getElementById('progressFill');
+    const processedFrames = document.getElementById('processedFrames');
+    const totalFrames = document.getElementById('totalFrames');
+    const processingSpeed = document.getElementById('processingSpeed');
 
-    // Données d'analyse
-    let dataPoints = [];
+    // Variables d'analyse
+    let analysisData = [];
+    let isAnalyzing = false;
+    let analysisInterval = null;
+    let targetTimestamp = 0;
+    let lastAnalysisTime = 0;
+    let frameProcessingTimes = [];
     let maxSpeed = 0;
-    let maxFrame = null;
-    let maxTime = 0;
-    let frameCount = 0;
-    let validFrameCount = 0;
+    let pose = null;
 
-    // Classe pour filtrer et lisser les données
-    class DataFilter {
-      constructor(windowSize = 7) {
-        this.windowSize = windowSize;
-        this.positions = [];
-        this.velocities = [];
-        this.confidences = [];
+    // Filtre de Kalman simplifié
+    class KalmanFilter {
+      constructor(processNoise = 0.01, measurementNoise = 0.1) {
+        this.processNoise = processNoise;
+        this.measurementNoise = measurementNoise;
+        this.positionEstimate = { x: 0, y: 0, z: 0 };
+        this.velocityEstimate = { x: 0, y: 0, z: 0 };
+        this.positionUncertainty = 1;
+        this.velocityUncertainty = 1;
+        this.initialized = false;
       }
 
-      addPoint(position, confidence, timestamp) {
-        this.positions.push({...position, timestamp, confidence});
-        this.confidences.push(confidence);
-        
-        if (this.positions.length > this.windowSize) {
-          this.positions.shift();
-          this.confidences.shift();
+      update(measurement, dt) {
+        if (!this.initialized) {
+          this.positionEstimate = { ...measurement };
+          this.initialized = true;
+          return this.positionEstimate;
         }
-      }
 
-      getSmoothedPosition() {
-        if (this.positions.length < 3) return null;
-        
-        const validPositions = this.positions.filter(p => p.confidence > parseFloat(confidenceSlider.value));
-        if (validPositions.length < 2) return null;
-
-        // Moyenner les positions valides
-        const sum = validPositions.reduce((acc, pos) => ({
-          x: acc.x + pos.x,
-          y: acc.y + pos.y,
-          z: acc.z + pos.z,
-          timestamp: acc.timestamp + pos.timestamp
-        }), {x: 0, y: 0, z: 0, timestamp: 0});
-
-        return {
-          x: sum.x / validPositions.length,
-          y: sum.y / validPositions.length,
-          z: sum.z / validPositions.length,
-          timestamp: sum.timestamp / validPositions.length
+        // Prédiction
+        const predictedPosition = {
+          x: this.positionEstimate.x + this.velocityEstimate.x * dt,
+          y: this.positionEstimate.y + this.velocityEstimate.y * dt,
+          z: this.positionEstimate.z + this.velocityEstimate.z * dt
         };
-      }
 
-      calculateVelocity(currentPos, previousPos) {
-        if (!currentPos || !previousPos) return 0;
-        
-        const dt = currentPos.timestamp - previousPos.timestamp;
-        if (dt <= 0) return 0;
+        // Mise à jour
+        const innovation = {
+          x: measurement.x - predictedPosition.x,
+          y: measurement.y - predictedPosition.y,
+          z: measurement.z - predictedPosition.z
+        };
 
-        const dx = currentPos.x - previousPos.x;
-        const dy = currentPos.y - previousPos.y;
-        const dz = currentPos.z - previousPos.z;
-        
-        // Distance euclidienne 3D
-        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        
-        // Conversion en vitesse réelle
-        const pixelToMeter = parseFloat(referenceSizeSlider.value) / video.videoHeight;
-        const speedMs = (distance * video.videoWidth * pixelToMeter) / dt;
-        
-        return speedMs;
-      }
+        const kalmanGain = this.positionUncertainty / (this.positionUncertainty + this.measurementNoise);
 
-      isValidVelocity(velocity) {
-        const threshold = parseFloat(speedThresholdSlider.value);
-        return velocity >= threshold && velocity <= 50; // Limite supérieure réaliste
+        this.positionEstimate = {
+          x: predictedPosition.x + kalmanGain * innovation.x,
+          y: predictedPosition.y + kalmanGain * innovation.y,
+          z: predictedPosition.z + kalmanGain * innovation.z
+        };
+
+        this.velocityEstimate = {
+          x: innovation.x / dt,
+          y: innovation.y / dt,
+          z: innovation.z / dt
+        };
+
+        this.positionUncertainty = (1 - kalmanGain) * this.positionUncertainty + this.processNoise;
+
+        return this.positionEstimate;
       }
     }
 
-    const filter = new DataFilter();
+    // Filtre passe-bas
+    class LowPassFilter {
+      constructor(cutoffFreq, sampleRate) {
+        this.alpha = 2 * Math.PI * cutoffFreq / sampleRate;
+        this.alpha = this.alpha / (1 + this.alpha);
+        this.previousOutput = 0;
+        this.initialized = false;
+      }
 
-    // Graphique amélioré
+      filter(input) {
+        if (!this.initialized) {
+          this.previousOutput = input;
+          this.initialized = true;
+          return input;
+        }
+        
+        const output = this.alpha * input + (1 - this.alpha) * this.previousOutput;
+        this.previousOutput = output;
+        return output;
+      }
+    }
+
+    // Analyseur de vitesse amélioré
+    class VelocityAnalyzer {
+      constructor() {
+        this.kalmanFilter = new KalmanFilter();
+        this.lowPassFilter = new LowPassFilter(10, 60);
+        this.positionHistory = [];
+        this.velocityHistory = [];
+        this.lastValidPosition = null;
+        this.lastValidTime = null;
+      }
+
+      updateFilters() {
+        const cutoffFreq = parseFloat(lowPassFilter.value);
+        const sampleRate = parseFloat(analysisFrequency.value);
+        this.lowPassFilter = new LowPassFilter(cutoffFreq, sampleRate);
+      }
+
+      addMeasurement(position, confidence, timestamp) {
+        if (confidence < parseFloat(confidenceThreshold.value)) {
+          return this.handleMissing(timestamp);
+        }
+
+        const dt = this.lastValidTime ? timestamp - this.lastValidTime : 1/60;
+        const filteredPosition = this.kalmanFilter.update(position, dt);
+        
+        if (this.lastValidPosition && this.lastValidTime) {
+          const velocity = this.calculateVelocity(filteredPosition, this.lastValidPosition, dt);
+          const filteredVelocity = this.lowPassFilter.filter(velocity);
+          
+          this.velocityHistory.push({
+            timestamp,
+            velocity: filteredVelocity,
+            confidence,
+            position: filteredPosition
+          });
+        }
+
+        this.lastValidPosition = filteredPosition;
+        this.lastValidTime = timestamp;
+        
+        return filteredPosition;
+      }
+
+      calculateVelocity(currentPos, lastPos, dt) {
+        const dx = currentPos.x - lastPos.x;
+        const dy = currentPos.y - lastPos.y;
+        const dz = currentPos.z - lastPos.z;
+        
+        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        const pixelToMeter = parseFloat(referenceSize.value) / video.videoHeight;
+        
+        return (distance * video.videoWidth * pixelToMeter) / dt;
+      }
+
+      handleMissing(timestamp) {
+        if (enableInterpolation.checked && this.lastValidPosition && this.lastValidTime) {
+          // Interpolation linéaire simple
+          const dt = timestamp - this.lastValidTime;
+          if (dt < 0.1) { // Seulement pour les courtes absences
+            return this.lastValidPosition;
+          }
+        }
+        return null;
+      }
+
+      getSmoothedVelocity(windowSize = 9) {
+        if (this.velocityHistory.length < windowSize) return 0;
+        
+        const recent = this.velocityHistory.slice(-windowSize);
+        const sum = recent.reduce((acc, item) => acc + item.velocity, 0);
+        return sum / recent.length;
+      }
+    }
+
+    const velocityAnalyzer = new VelocityAnalyzer();
+
+    // Graphique
     const chart = new Chart(document.getElementById('chartCanvas'), {
       type: 'line',
       data: {
         labels: [],
         datasets: [{
-          label: 'Vitesse brute (m/s)',
+          label: 'Vitesse instantanée (m/s)',
           data: [],
           borderWidth: 1,
           borderColor: '#ff6b6b',
           backgroundColor: 'rgba(255, 107, 107, 0.1)',
           fill: false,
-          tension: 0.1,
-          pointRadius: 1
+          pointRadius: 0
         }, {
           label: 'Vitesse lissée (m/s)',
           data: [],
@@ -254,16 +418,14 @@
           borderColor: '#4bc0c0',
           backgroundColor: 'rgba(75, 192, 192, 0.1)',
           fill: false,
-          tension: 0.2,
           pointRadius: 0
         }]
       },
       options: {
         responsive: true,
+        animation: false,
         plugins: {
-          legend: {
-            labels: { color: '#fff' }
-          }
+          legend: { labels: { color: '#fff' } }
         },
         scales: {
           x: { 
@@ -274,49 +436,38 @@
           y: { 
             title: { display: true, text: 'Vitesse (m/s)', color: '#fff' },
             min: 0,
-            max: 20,
+            max: 25,
             ticks: { color: '#fff' },
             grid: { color: '#333' }
           }
+        },
+        elements: {
+          line: { tension: 0.1 }
         }
       }
     });
 
-    // Gestionnaires d'événements pour les contrôles
-    confidenceSlider.addEventListener('input', (e) => {
+    // Gestionnaires d'événements
+    analysisFrequency.addEventListener('input', (e) => {
+      frequencyValue.textContent = e.target.value;
+      velocityAnalyzer.updateFilters();
+    });
+
+    smoothingWindow.addEventListener('input', (e) => {
+      smoothingValue.textContent = e.target.value;
+    });
+
+    lowPassFilter.addEventListener('input', (e) => {
+      filterValue.textContent = e.target.value;
+      velocityAnalyzer.updateFilters();
+    });
+
+    confidenceThreshold.addEventListener('input', (e) => {
       confidenceValue.textContent = e.target.value;
     });
 
-    smoothingSlider.addEventListener('input', (e) => {
-      smoothingValue.textContent = e.target.value;
-      filter.windowSize = parseInt(e.target.value);
-    });
-
-    speedThresholdSlider.addEventListener('input', (e) => {
-      speedThresholdValue.textContent = e.target.value;
-    });
-
-    referenceSizeSlider.addEventListener('input', (e) => {
+    referenceSize.addEventListener('input', (e) => {
       referenceSizeValue.textContent = e.target.value;
-    });
-
-    resetBtn.addEventListener('click', () => {
-      dataPoints = [];
-      maxSpeed = 0;
-      maxFrame = null;
-      maxTime = 0;
-      frameCount = 0;
-      validFrameCount = 0;
-      filter.positions = [];
-      filter.velocities = [];
-      filter.confidences = [];
-      
-      chart.data.labels = [];
-      chart.data.datasets[0].data = [];
-      chart.data.datasets[1].data = [];
-      chart.update();
-      
-      updateStats();
     });
 
     uploadInput.addEventListener('change', (e) => {
@@ -325,32 +476,39 @@
       const url = URL.createObjectURL(file);
       video.src = url;
       video.load();
-      resetBtn.click(); // Reset automatique
+      resetAnalysis();
     });
 
-    // Configuration MediaPipe
-    const pose = new Pose({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
-    });
+    startAnalysisBtn.addEventListener('click', startAnalysis);
+    pauseAnalysisBtn.addEventListener('click', pauseAnalysis);
+    resetAnalysisBtn.addEventListener('click', resetAnalysis);
+    exportDataBtn.addEventListener('click', exportData);
 
-    pose.setOptions({
-      modelComplexity: 1,
-      smoothLandmarks: true,
-      enableSegmentation: false,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5
-    });
+    // Initialisation MediaPipe
+    async function initializePose() {
+      pose = new Pose({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+      });
 
-    pose.onResults(onResults);
+      pose.setOptions({
+        modelComplexity: 1,
+        smoothLandmarks: false, // Nous gérons le lissage nous-mêmes
+        enableSegmentation: false,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
 
-    let lastSmoothedPos = null;
-    let velocityBuffer = [];
+      pose.onResults(onResults);
+    }
 
     function onResults(results) {
-      frameCount++;
+      if (!isAnalyzing) return;
+
+      const now = performance.now();
+      const currentTime = video.currentTime;
+      
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
-      
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
@@ -359,167 +517,199 @@
         drawLandmarks(ctx, results.poseLandmarks, { color: '#FF0000', lineWidth: 2 });
 
         const rightWrist = results.poseLandmarks[16];
-        const leftShoulder = results.poseLandmarks[11];
-        const rightShoulder = results.poseLandmarks[12];
-        const timestamp = video.currentTime;
+        
+        if (rightWrist) {
+          const position = velocityAnalyzer.addMeasurement(
+            { x: rightWrist.x, y: rightWrist.y, z: rightWrist.z },
+            rightWrist.visibility,
+            currentTime
+          );
 
-        // Validation de la confiance et de la cohérence
-        if (rightWrist && rightWrist.visibility > parseFloat(confidenceSlider.value)) {
-          validFrameCount++;
-          
-          // Calibration dynamique basée sur la distance entre les épaules
-          let referenceSize = parseFloat(referenceSizeSlider.value);
-          if (leftShoulder && rightShoulder) {
-            const shoulderDistance = Math.sqrt(
-              Math.pow(leftShoulder.x - rightShoulder.x, 2) +
-              Math.pow(leftShoulder.y - rightShoulder.y, 2)
-            );
-            // Ajustement basé sur la largeur d'épaules moyenne (40cm)
-            referenceSize = 0.4 / shoulderDistance;
-          }
+          if (position && velocityAnalyzer.velocityHistory.length > 0) {
+            const instantVelocity = velocityAnalyzer.velocityHistory[velocityAnalyzer.velocityHistory.length - 1].velocity;
+            const smoothedVelocity = velocityAnalyzer.getSmoothedVelocity(parseInt(smoothingWindow.value));
+            
+            // Enregistrer les données
+            analysisData.push({
+              timestamp: currentTime,
+              instantVelocity,
+              smoothedVelocity,
+              confidence: rightWrist.visibility,
+              position
+            });
 
-          // Ajouter le point au filtre
-          filter.addPoint(rightWrist, rightWrist.visibility, timestamp);
-          
-          // Obtenir la position lissée
-          const smoothedPos = filter.getSmoothedPosition();
-          
-          if (smoothedPos && lastSmoothedPos) {
-            // Calculer la vitesse brute
-            const rawVelocity = filter.calculateVelocity(
-              { x: rightWrist.x, y: rightWrist.y, z: rightWrist.z, timestamp },
-              lastSmoothedPos
-            );
+            // Mettre à jour le graphique
+            chart.data.labels.push(currentTime.toFixed(2));
+            chart.data.datasets[0].data.push(instantVelocity);
+            chart.data.datasets[1].data.push(smoothedVelocity);
             
-            // Calculer la vitesse lissée
-            const smoothedVelocity = filter.calculateVelocity(smoothedPos, lastSmoothedPos);
+            if (chart.data.labels.length > 1000) {
+              chart.data.labels.shift();
+              chart.data.datasets[0].data.shift();
+              chart.data.datasets[1].data.shift();
+            }
             
-            // Validation des vitesses
-            if (filter.isValidVelocity(smoothedVelocity)) {
-              velocityBuffer.push(smoothedVelocity);
-              if (velocityBuffer.length > 10) velocityBuffer.shift();
-              
-              // Vitesse finale avec moyenne mobile
-              const finalVelocity = velocityBuffer.reduce((a, b) => a + b, 0) / velocityBuffer.length;
-              
-              // Enregistrer les données
-              const dataPoint = {
-                timestamp,
-                rawVelocity,
-                smoothedVelocity: finalVelocity,
-                confidence: rightWrist.visibility,
-                position: { x: rightWrist.x, y: rightWrist.y, z: rightWrist.z }
-              };
-              
-              dataPoints.push(dataPoint);
-              
-              // Mettre à jour le graphique
-              chart.data.labels.push(timestamp.toFixed(2));
-              chart.data.datasets[0].data.push(rawVelocity);
-              chart.data.datasets[1].data.push(finalVelocity);
-              
-              // Limiter les données affichées
-              if (chart.data.labels.length > 500) {
-                chart.data.labels.shift();
-                chart.data.datasets[0].data.shift();
-                chart.data.datasets[1].data.shift();
-              }
-              
-              chart.update('none');
-              
-              // Vérifier si c'est une nouvelle vitesse maximale
-              if (finalVelocity > maxSpeed) {
-                maxSpeed = finalVelocity;
-                maxTime = timestamp;
-                
-                // Capturer la frame
-                const tempCanvas = document.createElement('canvas');
-                tempCanvas.width = canvas.width;
-                tempCanvas.height = canvas.height;
-                const tempCtx = tempCanvas.getContext('2d');
-                tempCtx.drawImage(canvas, 0, 0);
-                
-                maxFrame = new Image();
-                maxFrame.src = tempCanvas.toDataURL('image/png');
-                
-                downloadFrameBtn.style.display = 'inline-block';
-                exportDataBtn.style.display = 'inline-block';
-              }
+            chart.update('none');
+            
+            if (smoothedVelocity > maxSpeed) {
+              maxSpeed = smoothedVelocity;
             }
           }
-          
-          lastSmoothedPos = smoothedPos;
         }
+      }
+
+      // Statistiques de performance
+      const processingTime = performance.now() - now;
+      frameProcessingTimes.push(processingTime);
+      if (frameProcessingTimes.length > 30) frameProcessingTimes.shift();
+      
+      updateProcessingStats();
+      updateAnalysisStats();
+    }
+
+    function startAnalysis() {
+      if (!video.src) {
+        alert('Veuillez d\'abord charger une vidéo');
+        return;
+      }
+
+      isAnalyzing = true;
+      startAnalysisBtn.disabled = true;
+      pauseAnalysisBtn.disabled = false;
+      processingInfo.style.display = 'block';
+      
+      const targetFPS = parseFloat(analysisFrequency.value);
+      const frameInterval = 1000 / targetFPS;
+      
+      targetTimestamp = 0;
+      lastAnalysisTime = performance.now();
+      
+      analysisInterval = setInterval(async () => {
+        if (!isAnalyzing || video.ended) {
+          pauseAnalysis();
+          return;
+        }
+
+        video.currentTime = targetTimestamp;
+        await pose.send({ image: video });
         
-        // Mettre à jour les statistiques
-        updateStats();
+        targetTimestamp += 1 / targetFPS;
+        
+        if (targetTimestamp >= video.duration) {
+          pauseAnalysis();
+        }
+      }, frameInterval);
+    }
+
+    function pauseAnalysis() {
+      isAnalyzing = false;
+      if (analysisInterval) {
+        clearInterval(analysisInterval);
+        analysisInterval = null;
+      }
+      
+      startAnalysisBtn.disabled = false;
+      pauseAnalysisBtn.disabled = true;
+      processingInfo.style.display = 'none';
+      exportDataBtn.disabled = analysisData.length === 0;
+    }
+
+    function resetAnalysis() {
+      pauseAnalysis();
+      analysisData = [];
+      maxSpeed = 0;
+      velocityAnalyzer.positionHistory = [];
+      velocityAnalyzer.velocityHistory = [];
+      velocityAnalyzer.lastValidPosition = null;
+      velocityAnalyzer.lastValidTime = null;
+      velocityAnalyzer.kalmanFilter = new KalmanFilter();
+      velocityAnalyzer.lowPassFilter = new LowPassFilter(parseFloat(lowPassFilter.value), parseFloat(analysisFrequency.value));
+      
+      chart.data.labels = [];
+      chart.data.datasets[0].data = [];
+      chart.data.datasets[1].data = [];
+      chart.update();
+      
+      updateAnalysisStats();
+      exportDataBtn.disabled = true;
+    }
+
+    function updateProcessingStats() {
+      if (video.duration > 0) {
+        const progress = (targetTimestamp / video.duration) * 100;
+        progressFill.style.width = Math.min(progress, 100) + '%';
+        
+        processedFrames.textContent = Math.floor(targetTimestamp * parseFloat(analysisFrequency.value));
+        totalFrames.textContent = Math.floor(video.duration * parseFloat(analysisFrequency.value));
+      }
+      
+      if (frameProcessingTimes.length > 0) {
+        const avgTime = frameProcessingTimes.reduce((a, b) => a + b, 0) / frameProcessingTimes.length;
+        const fps = 1000 / avgTime;
+        processingSpeed.textContent = fps.toFixed(1);
       }
     }
 
-    function updateStats() {
-      maxSpeedDisplay.textContent = maxSpeed.toFixed(2);
-      maxTimeDisplay.textContent = maxTime.toFixed(2);
-      
-      if (dataPoints.length > 0) {
-        const avgSpeed = dataPoints.reduce((sum, point) => sum + point.smoothedVelocity, 0) / dataPoints.length;
-        const avgConfidence = dataPoints.reduce((sum, point) => sum + point.confidence, 0) / dataPoints.length;
-        
-        avgSpeedDisplay.textContent = avgSpeed.toFixed(2);
-        avgConfidenceDisplay.textContent = (avgConfidence * 100).toFixed(1);
-      } else {
+    function updateAnalysisStats() {
+      if (analysisData.length === 0) {
+        maxSpeedDisplay.textContent = '-';
         avgSpeedDisplay.textContent = '-';
+        stdDevDisplay.textContent = '-';
         avgConfidenceDisplay.textContent = '-';
+        actualFreqDisplay.textContent = '-';
+        validRatioDisplay.textContent = '-';
+        return;
       }
+
+      const velocities = analysisData.map(d => d.smoothedVelocity);
+      const confidences = analysisData.map(d => d.confidence);
       
-      validPointsDisplay.textContent = `${validFrameCount}/${frameCount}`;
+      const avgVelocity = velocities.reduce((a, b) => a + b, 0) / velocities.length;
+      const avgConfidence = confidences.reduce((a, b) => a + b, 0) / confidences.length;
+      
+      const variance = velocities.reduce((acc, v) => acc + Math.pow(v - avgVelocity, 2), 0) / velocities.length;
+      const stdDev = Math.sqrt(variance);
+      
+      const totalTime = analysisData[analysisData.length - 1].timestamp - analysisData[0].timestamp;
+      const actualFreq = analysisData.length / totalTime;
+      
+      const validCount = analysisData.filter(d => d.confidence > parseFloat(confidenceThreshold.value)).length;
+      const validRatio = (validCount / analysisData.length) * 100;
+      
+      maxSpeedDisplay.textContent = maxSpeed.toFixed(2);
+      avgSpeedDisplay.textContent = avgVelocity.toFixed(2);
+      stdDevDisplay.textContent = stdDev.toFixed(2);
+      avgConfidenceDisplay.textContent = (avgConfidence * 100).toFixed(1);
+      actualFreqDisplay.textContent = actualFreq.toFixed(1);
+      validRatioDisplay.textContent = validRatio.toFixed(1);
     }
 
-    // Téléchargement de la frame
-    downloadFrameBtn.addEventListener('click', () => {
-      if (maxFrame) {
-        const a = document.createElement('a');
-        a.href = maxFrame.src;
-        a.download = `frame_vitesse_max_${maxSpeed.toFixed(2)}ms.png`;
-        a.click();
-      }
-    });
+    function exportData() {
+      if (analysisData.length === 0) return;
+      
+      const headers = ['timestamp', 'instant_velocity', 'smoothed_velocity', 'confidence', 'pos_x', 'pos_y', 'pos_z'];
+      const rows = analysisData.map(d => [
+        d.timestamp.toFixed(4),
+        d.instantVelocity.toFixed(6),
+        d.smoothedVelocity.toFixed(6),
+        d.confidence.toFixed(4),
+        d.position.x.toFixed(6),
+        d.position.y.toFixed(6),
+        d.position.z.toFixed(6)
+      ]);
+      
+      const csv = [headers.join(','), ...rows.map(row => row.join(','))].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `analyse_vitesse_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.csv`;
+      a.click();
+      URL.createObjectURL(url);
+    }
 
-    // Export des données
-    exportDataBtn.addEventListener('click', () => {
-      if (dataPoints.length > 0) {
-        const csv = ['timestamp,raw_velocity,smoothed_velocity,confidence,x,y,z'];
-        dataPoints.forEach(point => {
-          csv.push([
-            point.timestamp.toFixed(3),
-            point.rawVelocity.toFixed(4),
-            point.smoothedVelocity.toFixed(4),
-            point.confidence.toFixed(3),
-            point.position.x.toFixed(4),
-            point.position.y.toFixed(4),
-            point.position.z.toFixed(4)
-          ].join(','));
-        });
-        
-        const blob = new Blob([csv.join('\n')], { type: 'text/csv' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'analyse_vitesse_poignet.csv';
-        a.click();
-        URL.revokeObjectURL(url);
-      }
-    });
-
-    // Traitement vidéo
-    video.addEventListener('play', () => {
-      const processFrame = async () => {
-        if (!video.paused && !video.ended) {
-          await pose.send({ image: video });
-          requestAnimationFrame(processFrame);
-        }
-      };
-      requestAnimationFrame(processFrame);
-    });
+    // Initialisation
+    initializePose();
   </script>
 </body>
 </html>
