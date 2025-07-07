@@ -1,40 +1,51 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Analyse Vidéo - Vitesse Filtrée</title>
+  <title>Analyse Vidéo - MediaPipe Pose</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
   <style>
     body {
-      background: #111;
-      color: white;
-      text-align: center;
       font-family: sans-serif;
+      background: #121212;
+      color: #fff;
+      text-align: center;
+      margin: 0;
+      padding: 2rem;
     }
     canvas, video {
       max-width: 90vw;
+      height: auto;
     }
-    #results {
-      margin-top: 10px;
+    #uploadInput {
+      margin-top: 1rem;
+    }
+    #metrics {
+      margin-top: 1rem;
+      font-size: 1.2rem;
+      background: #000;
+      padding: 1rem;
+      display: inline-block;
     }
     button {
-      margin-top: 10px;
-      padding: 8px 16px;
+      margin-top: 1rem;
+      padding: 0.5rem 1rem;
     }
   </style>
 </head>
 <body>
-  <h1>Analyse biomécanique (filtrée)</h1>
+  <h1>Analyse biomécanique à partir d'une vidéo</h1>
   <input type="file" accept="video/*" id="uploadInput" />
   <br><br>
   <video id="inputVideo" controls></video>
   <canvas id="outputCanvas"></canvas>
 
-  <div id="results">
-    <p>💨 Vitesse max filtrée (main droite) : <span id="maxSpeed">0.00</span> m/s</p>
-    <p>🕒 Atteinte à : <span id="maxTime">0.00</span> s</p>
-    <button id="downloadBtn" style="display:none;">📸 Télécharger l'image du pic</button>
+  <div id="metrics">
+    <div>💨 <b>Vitesse Max</b> : <span id="maxSpeed">0</span> m/s</div>
+    <div>⏱️ <b>Temps dans la vidéo</b> : <span id="maxTime">0</span> s</div>
   </div>
+  <br>
+  <button id="downloadBtn" style="display:none;">Télécharger l’image du pic de vitesse</button>
 
   <script>
     const videoElement = document.getElementById('inputVideo');
@@ -42,17 +53,19 @@
     const canvasCtx = canvasElement.getContext('2d');
     const uploadInput = document.getElementById('uploadInput');
 
-    const maxSpeedDisplay = document.getElementById('maxSpeed');
-    const maxTimeDisplay = document.getElementById('maxTime');
+    const maxSpeedEl = document.getElementById('maxSpeed');
+    const maxTimeEl = document.getElementById('maxTime');
     const downloadBtn = document.getElementById('downloadBtn');
 
-    let previousLandmark = null;
+    let previousRightWrist = null;
     let previousTime = null;
-    let speedHistory = [];
-
     let maxSpeed = 0;
-    let maxSpeedFrameImage = null;
-    let maxSpeedTime = 0;
+    let maxFrameData = null;
+    let speedBuffer = [];
+
+    const BUFFER_SIZE = 5; // pour moyenne mobile
+    const MAX_PLAUSIBLE_SPEED = 25; // m/s
+    const MIN_PLAUSIBLE_SPEED = 0.01;
 
     uploadInput.addEventListener('change', (event) => {
       const file = event.target.files[0];
@@ -63,7 +76,7 @@
       }
     });
 
-    const pose = new Pose.Pose({
+    const pose = new Pose({
       locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
     });
 
@@ -77,84 +90,92 @@
 
     pose.onResults(onResults);
 
+    function getDistance3D(a, b) {
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      const dz = a.z - b.z;
+      return Math.sqrt(dx*dx + dy*dy + dz*dz);
+    }
+
+    function average(buffer) {
+      return buffer.reduce((a, b) => a + b, 0) / buffer.length;
+    }
+
     function onResults(results) {
       canvasElement.width = videoElement.videoWidth;
       canvasElement.height = videoElement.videoHeight;
-
       canvasCtx.save();
       canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
       canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
       if (results.poseLandmarks) {
-        drawConnectors(canvasCtx, results.poseLandmarks, Pose.POSE_CONNECTIONS, { color: '#0f0', lineWidth: 2 });
-        drawLandmarks(canvasCtx, results.poseLandmarks, { color: '#f00', lineWidth: 1 });
+        drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#00FF00', lineWidth: 3 });
+        drawLandmarks(canvasCtx, results.poseLandmarks, { color: '#FF0000', lineWidth: 2 });
 
         const now = videoElement.currentTime;
-        const rightWrist = results.poseLandmarks[16];
+        const rightWrist = results.poseLandmarks[16]; // index du poignet droit
+        const rightShoulder = results.poseLandmarks[12];
+        const leftShoulder = results.poseLandmarks[11];
 
-        if (rightWrist && previousLandmark && previousTime !== null) {
-          const dx = rightWrist.x - previousLandmark.x;
-          const dy = rightWrist.y - previousLandmark.y;
-          const dz = rightWrist.z - previousLandmark.z;
-          const dt = now - previousTime;
+        // estimer la distance épaule à épaule comme référence m/pixel
+        const refDistPx = Math.sqrt(
+          Math.pow(rightShoulder.x - leftShoulder.x, 2) +
+          Math.pow(rightShoulder.y - leftShoulder.y, 2)
+        );
+        const refDistM = 0.4; // écart moyen d’épaule en mètre
+        const pixelsToMeters = refDistM / refDistPx;
 
-          if (dt > 0) {
-            const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-            const pxDistance = distance * videoElement.videoWidth;
-            let speed = pxDistance / dt;
+        if (previousRightWrist && previousTime !== null) {
+          const distancePx = getDistance3D(rightWrist, previousRightWrist);
+          const distanceM = distancePx * pixelsToMeters;
+          const deltaTime = now - previousTime;
+          let speed = deltaTime > 0 ? distanceM / deltaTime : 0;
 
-            // Estimation conversion px → m (environ 0.0025 m/px selon calibration à l'épaule)
-            speed = speed * 0.0025;
+          // filtrage par borne
+          if (speed < MIN_PLAUSIBLE_SPEED || speed > MAX_PLAUSIBLE_SPEED) {
+            speed = 0;
+          }
 
-            // Ajout dans l’historique
-            speedHistory.push(speed);
-            if (speedHistory.length > 3) speedHistory.shift();
+          // moyenne mobile
+          speedBuffer.push(speed);
+          if (speedBuffer.length > BUFFER_SIZE) speedBuffer.shift();
+          const smoothedSpeed = average(speedBuffer);
 
-            // Moyenne mobile
-            const smoothedSpeed = speedHistory.reduce((a, b) => a + b, 0) / speedHistory.length;
+          // mise à jour vitesse max
+          if (smoothedSpeed > maxSpeed) {
+            maxSpeed = smoothedSpeed;
+            maxSpeedEl.textContent = maxSpeed.toFixed(2);
+            maxTimeEl.textContent = now.toFixed(2);
 
-            // Filtrage : ignorer les valeurs aberrantes > 20 m/s
-            if (smoothedSpeed < 20) {
-              if (smoothedSpeed > maxSpeed) {
-                maxSpeed = smoothedSpeed;
-                maxSpeedTime = now;
-
-                // Stocker une image du canvas
-                maxSpeedFrameImage = new Image();
-                maxSpeedFrameImage.src = canvasElement.toDataURL('image/png');
-                downloadBtn.style.display = 'inline-block';
-              }
-
-              maxSpeedDisplay.textContent = maxSpeed.toFixed(2);
-              maxTimeDisplay.textContent = maxSpeedTime.toFixed(2);
-            }
+            // capturer la frame canvas
+            maxFrameData = canvasElement.toDataURL('image/png');
+            downloadBtn.style.display = 'inline-block';
           }
         }
 
-        previousLandmark = rightWrist;
+        previousRightWrist = rightWrist;
         previousTime = now;
       }
-
       canvasCtx.restore();
     }
 
     videoElement.addEventListener('play', () => {
-      function processFrame() {
+      const onFrame = async () => {
         if (!videoElement.paused && !videoElement.ended) {
-          pose.send({ image: videoElement });
-          requestAnimationFrame(processFrame);
+          await pose.send({ image: videoElement });
+          requestAnimationFrame(onFrame);
         }
-      }
-      requestAnimationFrame(processFrame);
+      };
+      requestAnimationFrame(onFrame);
     });
 
     downloadBtn.addEventListener('click', () => {
-      if (!maxSpeedFrameImage) return;
-
-      const link = document.createElement('a');
-      link.href = maxSpeedFrameImage.src;
-      link.download = `frame_vitesse_max.png`;
-      link.click();
+      if (maxFrameData) {
+        const link = document.createElement('a');
+        link.href = maxFrameData;
+        link.download = 'pic_vitesse_max.png';
+        link.click();
+      }
     });
   </script>
 </body>
