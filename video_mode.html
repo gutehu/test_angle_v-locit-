@@ -1,56 +1,80 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <title>Analyse vidéo</title>
+  <meta charset="UTF-8">
+  <title>Analyse Vidéo avec Landmarks</title>
   <style>
     body {
       background: #111;
-      color: #eee;
-      font-family: sans-serif;
-      text-align: center;
-      padding-top: 2rem;
-    }
-
-    input[type="file"] {
-      margin: 20px;
-      padding: 10px;
-      font-size: 16px;
-      background-color: #333;
       color: white;
-      border: 1px solid #555;
-      border-radius: 5px;
-      cursor: pointer;
+      text-align: center;
+      font-family: sans-serif;
     }
-
-    video {
-      background: #000;
-      margin-top: 20px;
-      max-width: 90%;
+    #videoWrapper {
+      position: relative;
+      display: inline-block;
+    }
+    video, canvas {
+      max-width: 100%;
+      width: 640px;
       height: auto;
+    }
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      pointer-events: none;
     }
   </style>
 </head>
 <body>
 
-  <h1>📹 Téléverser une vidéo</h1>
+  <h1>🧠 Analyse vidéo + Landmarks</h1>
+  <input type="file" id="videoUpload" accept="video/*"><br><br>
 
-  <input type="file" id="videoUpload" accept="video/*" />
-  <br />
-  <video id="inputVideo" width="640" height="480" controls></video>
+  <div id="videoWrapper">
+    <video id="inputVideo" controls></video>
+    <canvas id="outputCanvas"></canvas>
+  </div>
 
-  <script>
-    document.getElementById('videoUpload').addEventListener('change', function () {
-      const file = this.files[0];
-      if (file) {
-        const videoURL = URL.createObjectURL(file);
-        const video = document.getElementById('inputVideo');
-        video.src = videoURL;
-        video.load();
-        // Ne pas appeler video.play()
-      }
-    });
-  </script>
+  <script type="module">
+    import {
+      Pose,
+      POSE_LANDMARKS,
+      drawConnectors,
+      drawLandmarks
+    } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3';
 
-</body>
-</html>
+    let pose, canvasCtx;
+
+    const videoElement = document.getElementById('inputVideo');
+    const canvasElement = document.getElementById('outputCanvas');
+
+    // Charger le modèle MediaPipe Pose
+    async function setupPose() {
+      pose = await Pose.createFromOptions({
+        runningMode: 'VIDEO',
+        modelAssetPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose_landmark_full.tflite'
+      });
+    }
+
+    // Synchroniser lecture vidéo + analyse MediaPipe
+    function startLandmarkLoop() {
+      const render = async () => {
+        if (videoElement.paused || videoElement.ended) return;
+        const timestamp = videoElement.currentTime * 1000;
+
+        const result = await pose.detectForVideo(videoElement, timestamp);
+        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        if (result.landmarks) {
+          drawConnectors(canvasCtx, result.landmarks, POSE_LANDMARKS);
+          drawLandmarks(canvasCtx, result.landmarks);
+        }
+        requestAnimationFrame(render);
+      };
+      requestAnimationFrame(render);
+    }
+
+    document.getElementById('videoUpload').addEventListener('change', async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
