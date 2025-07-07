@@ -2,56 +2,76 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Analyse Vidéo - MediaPipe Pose</title>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
+  <title>Analyse vidéo - MediaPipe Pose</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675464084/pose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
   <style>
     body {
+      margin: 0;
       font-family: sans-serif;
-      background-color: #222;
+      background: #111;
       color: #eee;
-      text-align: center;
-      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 20px;
     }
-    canvas {
-      border: 1px solid #eee;
+    video, canvas {
+      max-width: 90vw;
+      max-height: 80vh;
     }
-    video {
+    #upload-label {
+      background: #444;
+      padding: 10px 20px;
+      border-radius: 10px;
+      cursor: pointer;
+      margin-bottom: 10px;
+    }
+    #file-input {
       display: none;
     }
   </style>
 </head>
 <body>
-  <h1>Analyse biomécanique (vidéo)</h1>
-  <input type="file" id="videoUpload" accept="video/*" />
-  <br><br>
-  <button onclick="videoElement.play()">▶️ Lancer la vidéo</button>
-  <br><br>
-  <canvas id="outputCanvas" width="640" height="480"></canvas>
-  <video id="inputVideo" controls muted></video>
+  <label id="upload-label" for="file-input">📹 Télécharger une vidéo</label>
+  <input type="file" id="file-input" accept="video/*">
+  <video id="video" controls></video>
+  <canvas id="output"></canvas>
 
   <script>
-    const videoElement = document.getElementById('inputVideo');
-    const canvasElement = document.getElementById('outputCanvas');
+    const videoElement = document.getElementById('video');
+    const canvasElement = document.getElementById('output');
     const canvasCtx = canvasElement.getContext('2d');
-    const uploadInput = document.getElementById('videoUpload');
 
-    // Initialisation de MediaPipe Pose
-    const pose = new Pose.Pose({
-      locateFile: (file) => {
-        return `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`;
+    const fileInput = document.getElementById('file-input');
+    fileInput.addEventListener('change', (event) => {
+      const file = event.target.files[0];
+      if (file) {
+        const url = URL.createObjectURL(file);
+        videoElement.src = url;
+        videoElement.load();
       }
+    });
+
+    const pose = new Pose.Pose({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675464084/${file}`
     });
 
     pose.setOptions({
       modelComplexity: 1,
       smoothLandmarks: true,
       enableSegmentation: false,
+      smoothSegmentation: false,
       minDetectionConfidence: 0.5,
       minTrackingConfidence: 0.5
     });
 
-    pose.onResults(results => {
+    pose.onResults(onResults);
+
+    function onResults(results) {
+      canvasElement.width = videoElement.videoWidth;
+      canvasElement.height = videoElement.videoHeight;
+
       canvasCtx.save();
       canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
       canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
@@ -60,36 +80,18 @@
         drawLandmarks(canvasCtx, results.poseLandmarks, { color: '#FF0000', lineWidth: 2 });
       }
       canvasCtx.restore();
-    });
-
-    uploadInput.addEventListener('change', (e) => {
-      const file = e.target.files[0];
-      if (file) {
-        const url = URL.createObjectURL(file);
-        videoElement.src = url;
-        videoElement.load();
-        videoElement.addEventListener('loadeddata', () => {
-          console.log("Vidéo chargée");
-          videoElement.width = videoElement.videoWidth;
-          videoElement.height = videoElement.videoHeight;
-          canvasElement.width = videoElement.videoWidth;
-          canvasElement.height = videoElement.videoHeight;
-          processVideo();
-        });
-      }
-    });
-
-    async function processVideo() {
-      videoElement.addEventListener('play', () => {
-        function analyzeFrame() {
-          if (!videoElement.paused && !videoElement.ended) {
-            pose.send({ image: videoElement });
-            requestAnimationFrame(analyzeFrame);
-          }
-        }
-        analyzeFrame();
-      });
     }
+
+    async function analyzeFrame() {
+      if (!videoElement.paused && !videoElement.ended) {
+        await pose.send({ image: videoElement });
+        requestAnimationFrame(analyzeFrame);
+      }
+    }
+
+    videoElement.addEventListener('play', () => {
+      analyzeFrame();
+    });
   </script>
 </body>
 </html>
