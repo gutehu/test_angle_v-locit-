@@ -2,139 +2,27 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>Analyse vidéo avec vélocité</title>
-  <style>
-    body {
-      margin: 0;
-      font-family: sans-serif;
-      background: #111;
-      color: #eee;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-    canvas {
-      position: absolute;
-      top: 0;
-      left: 0;
-    }
-    video {
-      display: none;
-    }
-    #controls {
-      margin-top: 20px;
-    }
-    #velocityDisplay {
-      margin-top: 20px;
-      font-size: 1.5em;
-      color: lime;
-    }
-  </style>
-
-  <!-- MediaPipe -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <title>Test simple lecture vidéo</title>
 </head>
-<body>
-  <h2>Analyse vidéo (MediaPipe)</h2>
-
-  <input type="file" id="videoInput" accept="video/*" />
-  <div id="controls">
-    <button id="playBtn">▶️ Lecture</button>
-    <button id="pauseBtn">⏸️ Pause</button>
-  </div>
-
-  <div style="position: relative;">
-    <video id="inputVideo"></video>
-    <canvas id="outputCanvas"></canvas>
-  </div>
-
-  <div id="velocityDisplay">Vélocité main droite : 0.00 px/frame</div>
+<body style="background: #111; color: #fff; text-align: center;">
+  <h2>Test lecture vidéo</h2>
+  <input type="file" id="videoInput" accept="video/*">
+  <br><br>
+  <video id="video" width="640" controls></video>
 
   <script>
-    const video = document.getElementById('inputVideo');
-    const canvas = document.getElementById('outputCanvas');
-    const ctx = canvas.getContext('2d');
-    const velocityDisplay = document.getElementById('velocityDisplay');
+    const input = document.getElementById('videoInput');
+    const video = document.getElementById('video');
 
-    let previousWrist = null;
-
-    const pose = new Pose({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
-    });
-
-    pose.setOptions({
-      modelComplexity: 1,
-      smoothLandmarks: true,
-      enableSegmentation: false,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5,
-    });
-
-    pose.onResults(onResults);
-
-    const POSE_CONNECTIONS = [
-      [11, 13], [13, 15], [12, 14], [14, 16],
-      [11, 12], [23, 24], [11, 23], [12, 24]
-    ];
-
-    function calculateVelocity(current, previous) {
-      const dx = current.x - previous.x;
-      const dy = current.y - previous.y;
-      return Math.sqrt(dx * dx + dy * dy);
-    }
-
-    function onResults(results) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.save();
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
-
-      if (results.poseLandmarks) {
-        drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS,
-          { color: '#00FF00', lineWidth: 2 });
-        drawLandmarks(ctx, results.poseLandmarks,
-          { color: '#FF0000', lineWidth: 1 });
-
-        const rightWrist = results.poseLandmarks[16];
-        if (rightWrist && rightWrist.visibility > 0.5 && previousWrist) {
-          const velocity = calculateVelocity(rightWrist, previousWrist);
-          velocityDisplay.textContent = `Vélocité main droite : ${velocity.toFixed(2)} px/frame`;
-        }
-
-        if (rightWrist && rightWrist.visibility > 0.5) {
-          previousWrist = { ...rightWrist };
-        }
-      }
-
-      ctx.restore();
-    }
-
-    document.getElementById('videoInput').addEventListener('change', async (e) => {
-      const file = e.target.files[0];
+    input.addEventListener('change', () => {
+      const file = input.files[0];
       if (!file) return;
-      const fileURL = URL.createObjectURL(file);
-      video.src = fileURL;
-      await video.load();
-    });
-
-    document.getElementById('playBtn').addEventListener('click', () => {
-      video.play();
-    });
-
-    document.getElementById('pauseBtn').addEventListener('click', () => {
-      video.pause();
-    });
-
-    video.addEventListener('play', () => {
-      const processFrame = async () => {
-        if (!video.paused && !video.ended) {
-          await pose.send({ image: video });
-          requestAnimationFrame(processFrame);
-        }
-      };
-      requestAnimationFrame(processFrame);
+      const url = URL.createObjectURL(file);
+      video.src = url;
+      video.load();
+      video.play().catch(err => {
+        console.error("Erreur de lecture :", err);
+      });
     });
   </script>
 </body>
