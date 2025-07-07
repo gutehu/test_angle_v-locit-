@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>Analyse Vidéo - Vitesse Main Droite</title>
+  <title>Analyse Vidéo - Vitesse Main Droite (Améliorée)</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -31,61 +31,292 @@
     #info {
       margin-top: 1rem;
     }
+    #controls {
+      margin: 1rem 0;
+      padding: 1rem;
+      background: #1e1e1e;
+      border-radius: 8px;
+    }
+    .control-group {
+      margin: 0.5rem 0;
+    }
+    label {
+      display: inline-block;
+      width: 200px;
+      text-align: left;
+    }
+    input[type="range"] {
+      width: 200px;
+    }
+    .stats {
+      display: flex;
+      justify-content: space-around;
+      flex-wrap: wrap;
+      margin: 1rem 0;
+    }
+    .stat-item {
+      padding: 0.5rem 1rem;
+      background: #2a2a2a;
+      border-radius: 4px;
+      margin: 0.25rem;
+    }
   </style>
 </head>
 <body>
-  <h1>Analyse de la vitesse de la main droite</h1>
+  <h1>Analyse de la vitesse de la main droite (Version Améliorée)</h1>
 
   <input type="file" accept="video/*" id="uploadInput" />
+  
+  <div id="controls">
+    <div class="control-group">
+      <label>Seuil de confiance:</label>
+      <input type="range" id="confidenceSlider" min="0.1" max="1" step="0.1" value="0.7">
+      <span id="confidenceValue">0.7</span>
+    </div>
+    <div class="control-group">
+      <label>Fenêtre de lissage:</label>
+      <input type="range" id="smoothingSlider" min="3" max="15" step="2" value="7">
+      <span id="smoothingValue">7</span>
+    </div>
+    <div class="control-group">
+      <label>Seuil de vitesse (m/s):</label>
+      <input type="range" id="speedThresholdSlider" min="0.1" max="2" step="0.1" value="0.5">
+      <span id="speedThresholdValue">0.5</span>
+    </div>
+    <div class="control-group">
+      <label>Taille de référence (m):</label>
+      <input type="range" id="referenceSizeSlider" min="1.5" max="2.0" step="0.1" value="1.7">
+      <span id="referenceSizeValue">1.7</span>
+    </div>
+    <button id="resetBtn">🔄 Reset</button>
+  </div>
+
   <div id="container">
     <video id="inputVideo" controls></video>
     <canvas id="outputCanvas"></canvas>
   </div>
 
+  <div class="stats">
+    <div class="stat-item">
+      <strong>Vitesse maximale:</strong><br>
+      <span id="maxSpeed">-</span> m/s
+    </div>
+    <div class="stat-item">
+      <strong>Temps de vitesse max:</strong><br>
+      <span id="maxTime">-</span> s
+    </div>
+    <div class="stat-item">
+      <strong>Vitesse moyenne:</strong><br>
+      <span id="avgSpeed">-</span> m/s
+    </div>
+    <div class="stat-item">
+      <strong>Confiance moyenne:</strong><br>
+      <span id="avgConfidence">-</span>%
+    </div>
+    <div class="stat-item">
+      <strong>Points valides:</strong><br>
+      <span id="validPoints">-</span>
+    </div>
+  </div>
+
   <div id="info">
-    <p><strong>Vitesse maximale :</strong> <span id="maxSpeed">-</span> m/s</p>
-    <p><strong>Temps de vitesse max :</strong> <span id="maxTime">-</span> s</p>
     <button id="downloadFrameBtn" style="display:none;">📸 Télécharger la frame</button>
+    <button id="exportDataBtn" style="display:none;">📊 Exporter les données</button>
   </div>
 
   <canvas id="chartCanvas" height="100"></canvas>
 
   <script>
+    // Configuration et variables globales
     const video = document.getElementById('inputVideo');
     const canvas = document.getElementById('outputCanvas');
     const ctx = canvas.getContext('2d');
     const uploadInput = document.getElementById('uploadInput');
+    
+    // Contrôles
+    const confidenceSlider = document.getElementById('confidenceSlider');
+    const smoothingSlider = document.getElementById('smoothingSlider');
+    const speedThresholdSlider = document.getElementById('speedThresholdSlider');
+    const referenceSizeSlider = document.getElementById('referenceSizeSlider');
+    const resetBtn = document.getElementById('resetBtn');
+    
+    // Affichage des valeurs
+    const confidenceValue = document.getElementById('confidenceValue');
+    const smoothingValue = document.getElementById('smoothingValue');
+    const speedThresholdValue = document.getElementById('speedThresholdValue');
+    const referenceSizeValue = document.getElementById('referenceSizeValue');
+    
+    // Statistiques
     const maxSpeedDisplay = document.getElementById('maxSpeed');
     const maxTimeDisplay = document.getElementById('maxTime');
+    const avgSpeedDisplay = document.getElementById('avgSpeed');
+    const avgConfidenceDisplay = document.getElementById('avgConfidence');
+    const validPointsDisplay = document.getElementById('validPoints');
+    
     const downloadFrameBtn = document.getElementById('downloadFrameBtn');
+    const exportDataBtn = document.getElementById('exportDataBtn');
 
-    let lastTimestamp = null;
-    let lastPos = null;
+    // Données d'analyse
+    let dataPoints = [];
     let maxSpeed = 0;
     let maxFrame = null;
     let maxTime = 0;
-    const speeds = [];
-    const times = [];
+    let frameCount = 0;
+    let validFrameCount = 0;
 
+    // Classe pour filtrer et lisser les données
+    class DataFilter {
+      constructor(windowSize = 7) {
+        this.windowSize = windowSize;
+        this.positions = [];
+        this.velocities = [];
+        this.confidences = [];
+      }
+
+      addPoint(position, confidence, timestamp) {
+        this.positions.push({...position, timestamp, confidence});
+        this.confidences.push(confidence);
+        
+        if (this.positions.length > this.windowSize) {
+          this.positions.shift();
+          this.confidences.shift();
+        }
+      }
+
+      getSmoothedPosition() {
+        if (this.positions.length < 3) return null;
+        
+        const validPositions = this.positions.filter(p => p.confidence > parseFloat(confidenceSlider.value));
+        if (validPositions.length < 2) return null;
+
+        // Moyenner les positions valides
+        const sum = validPositions.reduce((acc, pos) => ({
+          x: acc.x + pos.x,
+          y: acc.y + pos.y,
+          z: acc.z + pos.z,
+          timestamp: acc.timestamp + pos.timestamp
+        }), {x: 0, y: 0, z: 0, timestamp: 0});
+
+        return {
+          x: sum.x / validPositions.length,
+          y: sum.y / validPositions.length,
+          z: sum.z / validPositions.length,
+          timestamp: sum.timestamp / validPositions.length
+        };
+      }
+
+      calculateVelocity(currentPos, previousPos) {
+        if (!currentPos || !previousPos) return 0;
+        
+        const dt = currentPos.timestamp - previousPos.timestamp;
+        if (dt <= 0) return 0;
+
+        const dx = currentPos.x - previousPos.x;
+        const dy = currentPos.y - previousPos.y;
+        const dz = currentPos.z - previousPos.z;
+        
+        // Distance euclidienne 3D
+        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        
+        // Conversion en vitesse réelle
+        const pixelToMeter = parseFloat(referenceSizeSlider.value) / video.videoHeight;
+        const speedMs = (distance * video.videoWidth * pixelToMeter) / dt;
+        
+        return speedMs;
+      }
+
+      isValidVelocity(velocity) {
+        const threshold = parseFloat(speedThresholdSlider.value);
+        return velocity >= threshold && velocity <= 50; // Limite supérieure réaliste
+      }
+    }
+
+    const filter = new DataFilter();
+
+    // Graphique amélioré
     const chart = new Chart(document.getElementById('chartCanvas'), {
       type: 'line',
       data: {
         labels: [],
         datasets: [{
-          label: 'Vitesse main droite (m/s)',
+          label: 'Vitesse brute (m/s)',
+          data: [],
+          borderWidth: 1,
+          borderColor: '#ff6b6b',
+          backgroundColor: 'rgba(255, 107, 107, 0.1)',
+          fill: false,
+          tension: 0.1,
+          pointRadius: 1
+        }, {
+          label: 'Vitesse lissée (m/s)',
           data: [],
           borderWidth: 2,
           borderColor: '#4bc0c0',
+          backgroundColor: 'rgba(75, 192, 192, 0.1)',
           fill: false,
           tension: 0.2,
+          pointRadius: 0
         }]
       },
       options: {
+        responsive: true,
+        plugins: {
+          legend: {
+            labels: { color: '#fff' }
+          }
+        },
         scales: {
-          x: { title: { display: true, text: 'Temps (s)' } },
-          y: { title: { display: true, text: 'Vitesse (m/s)' }, min: 0, max: 20 }
+          x: { 
+            title: { display: true, text: 'Temps (s)', color: '#fff' },
+            ticks: { color: '#fff' },
+            grid: { color: '#333' }
+          },
+          y: { 
+            title: { display: true, text: 'Vitesse (m/s)', color: '#fff' },
+            min: 0,
+            max: 20,
+            ticks: { color: '#fff' },
+            grid: { color: '#333' }
+          }
         }
       }
+    });
+
+    // Gestionnaires d'événements pour les contrôles
+    confidenceSlider.addEventListener('input', (e) => {
+      confidenceValue.textContent = e.target.value;
+    });
+
+    smoothingSlider.addEventListener('input', (e) => {
+      smoothingValue.textContent = e.target.value;
+      filter.windowSize = parseInt(e.target.value);
+    });
+
+    speedThresholdSlider.addEventListener('input', (e) => {
+      speedThresholdValue.textContent = e.target.value;
+    });
+
+    referenceSizeSlider.addEventListener('input', (e) => {
+      referenceSizeValue.textContent = e.target.value;
+    });
+
+    resetBtn.addEventListener('click', () => {
+      dataPoints = [];
+      maxSpeed = 0;
+      maxFrame = null;
+      maxTime = 0;
+      frameCount = 0;
+      validFrameCount = 0;
+      filter.positions = [];
+      filter.velocities = [];
+      filter.confidences = [];
+      
+      chart.data.labels = [];
+      chart.data.datasets[0].data = [];
+      chart.data.datasets[1].data = [];
+      chart.update();
+      
+      updateStats();
     });
 
     uploadInput.addEventListener('change', (e) => {
@@ -94,8 +325,10 @@
       const url = URL.createObjectURL(file);
       video.src = url;
       video.load();
+      resetBtn.click(); // Reset automatique
     });
 
+    // Configuration MediaPipe
     const pose = new Pose({
       locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
     });
@@ -110,63 +343,174 @@
 
     pose.onResults(onResults);
 
+    let lastSmoothedPos = null;
+    let velocityBuffer = [];
+
     function onResults(results) {
+      frameCount++;
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
+      
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
       if (results.poseLandmarks) {
-        drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#00FF00', lineWidth: 3 });
+        drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#00FF00', lineWidth: 2 });
         drawLandmarks(ctx, results.poseLandmarks, { color: '#FF0000', lineWidth: 2 });
 
         const rightWrist = results.poseLandmarks[16];
+        const leftShoulder = results.poseLandmarks[11];
+        const rightShoulder = results.poseLandmarks[12];
         const timestamp = video.currentTime;
 
-        if (rightWrist && lastPos && lastTimestamp !== null) {
-          const dx = rightWrist.x - lastPos.x;
-          const dy = rightWrist.y - lastPos.y;
-          const dz = rightWrist.z - lastPos.z;
-          const dt = timestamp - lastTimestamp;
-          const distance = Math.sqrt(dx * dx + dy * dy + dz * dz); // en fraction du cadre
-          const speed = (distance / dt) * video.videoWidth; // en px/s
-
-          // Conversion en m/s
-          const pixelToMeter = 1.7 / video.videoHeight; // approximativement taille humaine
-          const speedMs = speed * pixelToMeter;
-
-          speeds.push(speedMs);
-          times.push(timestamp);
-          chart.data.labels.push(timestamp.toFixed(2));
-          chart.data.datasets[0].data.push(speedMs);
-          chart.update();
-
-          if (speedMs > maxSpeed) {
-            maxSpeed = speedMs;
-            maxTime = timestamp;
-            maxFrame = new Image();
-            maxFrame.src = canvas.toDataURL('image/png');
-
-            maxSpeedDisplay.textContent = speedMs.toFixed(2);
-            maxTimeDisplay.textContent = timestamp.toFixed(2);
-            downloadFrameBtn.style.display = 'inline-block';
+        // Validation de la confiance et de la cohérence
+        if (rightWrist && rightWrist.visibility > parseFloat(confidenceSlider.value)) {
+          validFrameCount++;
+          
+          // Calibration dynamique basée sur la distance entre les épaules
+          let referenceSize = parseFloat(referenceSizeSlider.value);
+          if (leftShoulder && rightShoulder) {
+            const shoulderDistance = Math.sqrt(
+              Math.pow(leftShoulder.x - rightShoulder.x, 2) +
+              Math.pow(leftShoulder.y - rightShoulder.y, 2)
+            );
+            // Ajustement basé sur la largeur d'épaules moyenne (40cm)
+            referenceSize = 0.4 / shoulderDistance;
           }
-        }
 
-        lastPos = rightWrist;
-        lastTimestamp = timestamp;
+          // Ajouter le point au filtre
+          filter.addPoint(rightWrist, rightWrist.visibility, timestamp);
+          
+          // Obtenir la position lissée
+          const smoothedPos = filter.getSmoothedPosition();
+          
+          if (smoothedPos && lastSmoothedPos) {
+            // Calculer la vitesse brute
+            const rawVelocity = filter.calculateVelocity(
+              { x: rightWrist.x, y: rightWrist.y, z: rightWrist.z, timestamp },
+              lastSmoothedPos
+            );
+            
+            // Calculer la vitesse lissée
+            const smoothedVelocity = filter.calculateVelocity(smoothedPos, lastSmoothedPos);
+            
+            // Validation des vitesses
+            if (filter.isValidVelocity(smoothedVelocity)) {
+              velocityBuffer.push(smoothedVelocity);
+              if (velocityBuffer.length > 10) velocityBuffer.shift();
+              
+              // Vitesse finale avec moyenne mobile
+              const finalVelocity = velocityBuffer.reduce((a, b) => a + b, 0) / velocityBuffer.length;
+              
+              // Enregistrer les données
+              const dataPoint = {
+                timestamp,
+                rawVelocity,
+                smoothedVelocity: finalVelocity,
+                confidence: rightWrist.visibility,
+                position: { x: rightWrist.x, y: rightWrist.y, z: rightWrist.z }
+              };
+              
+              dataPoints.push(dataPoint);
+              
+              // Mettre à jour le graphique
+              chart.data.labels.push(timestamp.toFixed(2));
+              chart.data.datasets[0].data.push(rawVelocity);
+              chart.data.datasets[1].data.push(finalVelocity);
+              
+              // Limiter les données affichées
+              if (chart.data.labels.length > 500) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+                chart.data.datasets[1].data.shift();
+              }
+              
+              chart.update('none');
+              
+              // Vérifier si c'est une nouvelle vitesse maximale
+              if (finalVelocity > maxSpeed) {
+                maxSpeed = finalVelocity;
+                maxTime = timestamp;
+                
+                // Capturer la frame
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = canvas.width;
+                tempCanvas.height = canvas.height;
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCtx.drawImage(canvas, 0, 0);
+                
+                maxFrame = new Image();
+                maxFrame.src = tempCanvas.toDataURL('image/png');
+                
+                downloadFrameBtn.style.display = 'inline-block';
+                exportDataBtn.style.display = 'inline-block';
+              }
+            }
+          }
+          
+          lastSmoothedPos = smoothedPos;
+        }
+        
+        // Mettre à jour les statistiques
+        updateStats();
       }
     }
 
+    function updateStats() {
+      maxSpeedDisplay.textContent = maxSpeed.toFixed(2);
+      maxTimeDisplay.textContent = maxTime.toFixed(2);
+      
+      if (dataPoints.length > 0) {
+        const avgSpeed = dataPoints.reduce((sum, point) => sum + point.smoothedVelocity, 0) / dataPoints.length;
+        const avgConfidence = dataPoints.reduce((sum, point) => sum + point.confidence, 0) / dataPoints.length;
+        
+        avgSpeedDisplay.textContent = avgSpeed.toFixed(2);
+        avgConfidenceDisplay.textContent = (avgConfidence * 100).toFixed(1);
+      } else {
+        avgSpeedDisplay.textContent = '-';
+        avgConfidenceDisplay.textContent = '-';
+      }
+      
+      validPointsDisplay.textContent = `${validFrameCount}/${frameCount}`;
+    }
+
+    // Téléchargement de la frame
     downloadFrameBtn.addEventListener('click', () => {
       if (maxFrame) {
         const a = document.createElement('a');
         a.href = maxFrame.src;
-        a.download = 'frame_vitesse_max.png';
+        a.download = `frame_vitesse_max_${maxSpeed.toFixed(2)}ms.png`;
         a.click();
       }
     });
 
+    // Export des données
+    exportDataBtn.addEventListener('click', () => {
+      if (dataPoints.length > 0) {
+        const csv = ['timestamp,raw_velocity,smoothed_velocity,confidence,x,y,z'];
+        dataPoints.forEach(point => {
+          csv.push([
+            point.timestamp.toFixed(3),
+            point.rawVelocity.toFixed(4),
+            point.smoothedVelocity.toFixed(4),
+            point.confidence.toFixed(3),
+            point.position.x.toFixed(4),
+            point.position.y.toFixed(4),
+            point.position.z.toFixed(4)
+          ].join(','));
+        });
+        
+        const blob = new Blob([csv.join('\n')], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'analyse_vitesse_poignet.csv';
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    });
+
+    // Traitement vidéo
     video.addEventListener('play', () => {
       const processFrame = async () => {
         if (!video.paused && !video.ended) {
