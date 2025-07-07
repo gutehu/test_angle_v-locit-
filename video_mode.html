@@ -39,8 +39,15 @@
 
   <h1>Analyse biomécanique à partir d'une vidéo</h1>
 
-  <label for="videoInput">📁 Télécharger une vidéo</label>
-  <input type="file" id="videoInput" accept="video/*" />
+  
+    <input type="file" id="videoInput" accept="video/*" style="display: none;" />
+    <button id="uploadBtn">📁 Télécharger une vidéo</button>
+    <script>
+      document.getElementById('uploadBtn').onclick = () => {
+        document.getElementById('videoInput').click();
+      };
+    </script>
+    
   <br />
   <video id="uploadedVideo" controls muted playsinline></video>
   <canvas id="outputCanvas"></canvas>
