@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Analyse vidéo (MediaPipe)</title>
+  <title>Analyse vidéo (landmarks + vélocité)</title>
   <style>
     body {
       margin: 0;
@@ -24,6 +24,11 @@
     #controls {
       margin-top: 20px;
     }
+    #velocityDisplay {
+      margin-top: 10px;
+      font-size: 1.2em;
+      color: #0f0;
+    }
   </style>
 </head>
 <body>
@@ -35,22 +40,28 @@
     <button id="pauseBtn">⏸️ Pause</button>
   </div>
 
+  <div id="velocityDisplay">Vélocité main droite : 0.00 px/s</div>
+
   <div style="position: relative;">
     <video id="inputVideo"></video>
     <canvas id="outputCanvas"></canvas>
   </div>
 
   <script type="module">
-    import { Pose, POSE_CONNECTIONS } from 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.4/pose.js';
-    import { drawConnectors, drawLandmarks } from 'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.4/drawing_utils.js';
+    import { Pose, POSE_CONNECTIONS } from 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469409/pose.js';
+    import { drawConnectors, drawLandmarks } from 'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.5.1675469409/drawing_utils.js';
 
     const video = document.getElementById('inputVideo');
     const canvas = document.getElementById('outputCanvas');
     const ctx = canvas.getContext('2d');
+    const velocityDisplay = document.getElementById('velocityDisplay');
+
+    let lastPosition = null;
+    let lastTimestamp = null;
 
     const pose = new Pose({
       locateFile: (file) =>
-        `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.4/${file}`,
+        `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469409/${file}`,
     });
 
     pose.setOptions({
@@ -71,41 +82,5 @@
       ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
       if (results.poseLandmarks) {
-        drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS,
-          { color: '#00FF00', lineWidth: 2 });
-        drawLandmarks(ctx, results.poseLandmarks,
-          { color: '#FF0000', lineWidth: 1 });
-      }
-
-      ctx.restore();
-    }
-
-    document.getElementById('videoInput').addEventListener('change', async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-
-      const fileURL = URL.createObjectURL(file);
-      video.src = fileURL;
-      await video.load();
-    });
-
-    document.getElementById('playBtn').addEventListener('click', () => {
-      video.play();
-    });
-
-    document.getElementById('pauseBtn').addEventListener('click', () => {
-      video.pause();
-    });
-
-    video.addEventListener('play', async () => {
-      async function processFrame() {
-        if (!video.paused && !video.ended) {
-          await pose.send({ image: video });
-          requestAnimationFrame(processFrame);
-        }
-      }
-      requestAnimationFrame(processFrame);
-    });
-  </script>
-</body>
-</html>
+        drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#00FF00', lineWidth: 2 });
+        drawLandmarks(ctx, results.poseLandma
