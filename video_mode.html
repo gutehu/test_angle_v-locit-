@@ -1,82 +1,56 @@
-
 <!DOCTYPE html>
-<html>
+<html lang="fr">
 <head>
-  <title>Analyse Vidéo - MediaPipe Pose</title>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <meta charset="UTF-8" />
+  <title>Analyse vidéo</title>
   <style>
     body {
-      font-family: Arial, sans-serif;
       background: #111;
       color: #eee;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      margin: 0;
+      font-family: sans-serif;
+      text-align: center;
+      padding-top: 2rem;
     }
-    canvas {
-      position: absolute;
+
+    input[type="file"] {
+      margin: 20px;
+      padding: 10px;
+      font-size: 16px;
+      background-color: #333;
+      color: white;
+      border: 1px solid #555;
+      border-radius: 5px;
+      cursor: pointer;
     }
-    #videoElement {
-      max-width: 100%;
+
+    video {
+      background: #000;
       margin-top: 20px;
+      max-width: 90%;
+      height: auto;
     }
   </style>
 </head>
 <body>
-  <h1>Analyse biomécanique à partir d'une vidéo</h1>
-  <input type="file" id="uploadVideo" accept="video/*" />
-  <video id="videoElement" playsinline></video>
-  <canvas id="outputCanvas"></canvas>
+
+  <h1>📹 Téléverser une vidéo</h1>
+
+  <input type="file" id="videoUpload" accept="video/*" />
+  <br />
+  <video id="inputVideo" width="640" height="480" controls></video>
 
   <script>
-    const videoElement = document.getElementById('videoElement');
-    const canvasElement = document.getElementById('outputCanvas');
-    const canvasCtx = canvasElement.getContext('2d');
-
-    const pose = new Pose({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
-    });
-
-    pose.setOptions({
-      modelComplexity: 1,
-      smoothLandmarks: true,
-      enableSegmentation: false,
-      smoothSegmentation: false,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5
-    });
-
-    pose.onResults((results) => {
-      canvasElement.width = videoElement.videoWidth;
-      canvasElement.height = videoElement.videoHeight;
-      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-      if (results.poseLandmarks) {
-        drawConnectors(canvasCtx, results.poseLandmarks, Pose.POSE_CONNECTIONS, { color: '#00FF00', lineWidth: 4 });
-        drawLandmarks(canvasCtx, results.poseLandmarks, { color: '#FF0000', lineWidth: 2 });
+    document.getElementById('videoUpload').addEventListener('change', function () {
+      const file = this.files[0];
+      if (file) {
+        const videoURL = URL.createObjectURL(file);
+        const video = document.getElementById('inputVideo');
+        video.src = videoURL;
+        video.load();
+        video.play();
       }
     });
-
-    document.getElementById('uploadVideo').addEventListener('change', (event) => {
-      const file = event.target.files[0];
-      if (!file) return;
-
-      const url = URL.createObjectURL(file);
-      videoElement.src = url;
-      videoElement.load();
-      videoElement.play();
-
-      videoElement.onloadeddata = async () => {
-        function processFrame() {
-          if (videoElement.paused || videoElement.ended) return;
-          pose.send({ image: videoElement });
-          requestAnimationFrame(processFrame);
-        }
-        processFrame();
-      };
-    });
   </script>
+
 </body>
 </html>
