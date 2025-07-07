@@ -28,6 +28,11 @@
       padding: 0.5rem;
       border: 1px solid #666;
     }
+    #downloadBtn {
+      margin-top: 1rem;
+      padding: 0.5rem 1rem;
+      font-size: 1rem;
+    }
   </style>
 </head>
 <body>
@@ -42,16 +47,22 @@
     <tr><th>Temps dans la vidéo</th><td id="maxTime">-</td></tr>
   </table>
 
+  <button id="downloadBtn" disabled>Télécharger l’image du pic de vitesse</button>
+
   <script>
     const videoElement = document.getElementById('inputVideo');
     const canvasElement = document.getElementById('outputCanvas');
     const canvasCtx = canvasElement.getContext('2d');
     const uploadInput = document.getElementById('uploadInput');
+    const maxSpeedDisplay = document.getElementById('maxSpeed');
+    const maxTimeDisplay = document.getElementById('maxTime');
+    const downloadBtn = document.getElementById('downloadBtn');
 
     let previousWrist = null;
     let previousTime = null;
     let maxSpeed = 0;
     let maxTime = 0;
+    let snapshotImageDataURL = null;
 
     uploadInput.addEventListener('change', (event) => {
       const file = event.target.files[0];
@@ -121,8 +132,10 @@
             if (speed > maxSpeed) {
               maxSpeed = speed;
               maxTime = currentTime;
-              document.getElementById('maxSpeed').textContent = maxSpeed.toFixed(2) + ' m/s';
-              document.getElementById('maxTime').textContent = maxTime.toFixed(2) + ' s';
+              snapshotImageDataURL = canvasElement.toDataURL(); // capture image
+              maxSpeedDisplay.textContent = maxSpeed.toFixed(2) + ' m/s';
+              maxTimeDisplay.textContent = maxTime.toFixed(2) + ' s';
+              downloadBtn.disabled = false;
             }
           }
         }
@@ -139,6 +152,8 @@
       previousTime = null;
       maxSpeed = 0;
       maxTime = 0;
+      snapshotImageDataURL = null;
+      downloadBtn.disabled = true;
 
       const onFrame = async () => {
         if (!videoElement.paused && !videoElement.ended) {
@@ -147,6 +162,15 @@
         }
       };
       requestAnimationFrame(onFrame);
+    });
+
+    downloadBtn.addEventListener('click', () => {
+      if (snapshotImageDataURL) {
+        const a = document.createElement('a');
+        a.href = snapshotImageDataURL;
+        a.download = `vitesse_max_${maxSpeed.toFixed(2)}_ms.png`;
+        a.click();
+      }
     });
   </script>
 </body>
